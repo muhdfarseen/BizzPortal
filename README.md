@@ -77,7 +77,7 @@ created by `DemoDataLoader` and only exist under the `local` profile.
 
 ```bash
 cd backend  && mvn test                      # 70 tests
-cd frontend && npm test -- --watch=false     # 298 tests
+cd frontend && npm test -- --watch=false     # 302 tests
 ```
 
 The backend suite needs `bizzskill_portal_test` to exist and runs against real
@@ -205,7 +205,7 @@ configuration, HTTP services for every screen, a bearer-token interceptor that
 ends the session on a 401, an error interceptor that unwraps the API's error
 envelope, route guards for authentication and permissions, and toast
 notifications for every action. No in-memory mock data remains in production
-code. 298 tests.
+code. 302 tests.
 
 ### Before deploying
 
