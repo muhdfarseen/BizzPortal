@@ -1,0 +1,290 @@
+/* ============================================================
+   Assessment Edit Dialog — mirrors the portal modal styling
+   (see dashboard-layout.css). Scores are typed; CEFR levels are
+   derived from the configured mapping and shown read-only.
+   ============================================================ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
+  animation: backdrop-fade-in 0.15s ease-out;
+}
+
+.modal-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 30rem;
+  max-height: calc(100dvh - 2rem);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 20px 35px -10px oklch(0 0 0 / 0.25);
+  overflow: hidden;
+  animation: dialog-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes backdrop-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ── Header ────────────────────────────────────────────────── */
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.25rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-title-area {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.modal-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.modal-title {
+  font-family: var(--font-heading);
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--color-foreground);
+  margin: 0;
+  line-height: 1.25;
+}
+
+.modal-subtitle {
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  color: var(--color-muted-foreground);
+  margin: 0.125rem 0 0;
+}
+
+.modal-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.modal-close-btn:hover {
+  background: var(--color-sidebar-accent);
+  color: var(--color-foreground);
+}
+
+/* ── Body ──────────────────────────────────────────────────── */
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+
+/* Explains that a blank exam is a normal state, not something to fix. Muted so
+   it reads as guidance rather than as a warning. */
+.modal-hint {
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-muted-foreground);
+  background: var(--color-muted);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.625rem;
+  margin: 0;
+}
+
+.exam-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-muted);
+}
+
+.exam-name {
+  font-family: var(--font-heading);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-foreground);
+  margin: 0;
+}
+
+.exam-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 480px) {
+  .exam-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.field-label {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.score-input {
+  height: 36px;
+  padding: 0 0.75rem;
+  border: none;
+  border-radius: var(--radius-lg);
+  background-color: var(--ngp-background, #ffffff);
+  box-shadow: var(--ngp-input-shadow);
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--ngp-text-primary);
+  box-sizing: border-box;
+}
+
+.score-input:focus {
+  outline: 2px solid var(--ngp-focus-ring, var(--color-primary));
+  outline-offset: 2px;
+}
+
+.score-input[aria-invalid='true'] {
+  box-shadow: inset 0 0 0 1px var(--color-destructive);
+}
+
+.field-error {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--color-destructive);
+}
+
+/* Read-only: the level is derived from the score, not chosen by hand. */
+.level-preview {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 0.75rem;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  background: #ffffff;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+  box-sizing: border-box;
+}
+
+.level-preview[data-empty='true'] {
+  color: var(--color-muted-foreground);
+  font-weight: 500;
+}
+
+/* ── Footer ────────────────────────────────────────────────── */
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.625rem;
+  padding: 0.875rem 1.25rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-muted);
+}
+
+.btn-secondary,
+.btn-primary {
+  height: 36px;
+  padding: 0 1.25rem;
+  border-radius: var(--radius-lg);
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.btn-secondary {
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+}
+
+.btn-secondary:hover {
+  background: var(--color-secondary);
+}
+
+.btn-primary {
+  border: none;
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.btn-primary:disabled {
+  background: var(--color-muted);
+  color: var(--color-muted-foreground);
+  cursor: not-allowed;
+}

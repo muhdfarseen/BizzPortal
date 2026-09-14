@@ -1,0 +1,667 @@
+/* ============================================================
+   User Management — admin CRUD over the portal roster.
+
+   Follows the sibling dashboard pages (see configuration.css and
+   assessment-table.css): a soft card carrying a search toolbar,
+   the grid and a pagination footer, plus the shared modal shell
+   used by user-edit-dialog.
+   ============================================================ */
+
+:host {
+  display: block;
+}
+
+.page-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* ── Header ────────────────────────────────────────────────── */
+
+.page-header {
+  display: flex;
+  /* Title and actions share one centre line, now that the title stands alone. */
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.page-heading {
+  min-width: 0;
+}
+
+.page-title {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.btn-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-add:hover {
+  background: var(--color-primary-hover);
+}
+
+/* ── Card + toolbar ────────────────────────────────────────── */
+
+.table-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+}
+
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  padding: 0.875rem 1.25rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 18rem;
+  max-width: 26rem;
+  color: #94a3b8;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.75rem;
+  pointer-events: none;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.5rem 2.25rem 0.5rem 2.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: #ffffff;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  color: var(--color-card-foreground);
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.search-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(36, 105, 188, 0.1);
+}
+
+.search-input::placeholder {
+  color: var(--color-muted-foreground);
+}
+
+.search-clear {
+  position: absolute;
+  right: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.search-clear:hover {
+  color: var(--color-foreground);
+}
+
+.toolbar-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* ── Grid ──────────────────────────────────────────────────── */
+
+.table-scroll {
+  overflow: auto;
+  max-height: 34rem;
+}
+
+.user-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.user-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0;
+  background: #ffffff;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.th-label,
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  padding: 0.75rem 1.25rem;
+  font: inherit;
+  color: inherit;
+}
+
+.th-sort {
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.th-sort:hover {
+  color: var(--color-primary);
+}
+
+.th-sort-icon {
+  flex-shrink: 0;
+  color: #cbd5e1;
+}
+
+.th-sort:hover .th-sort-icon,
+.th-sort-icon.is-active {
+  color: var(--color-primary);
+}
+
+.user-table tbody td {
+  padding: 0.75rem 1.25rem;
+  background: #ffffff;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-card-foreground);
+  vertical-align: middle;
+}
+
+.user-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.user-table tbody tr:hover td {
+  background: #f6f9fd;
+}
+
+/* Your own account gets a quiet tint so it is easy to spot. */
+.user-table tbody tr.is-self td {
+  background: #f8fbff;
+}
+
+.td-empid {
+  font-weight: 500;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+/* A <td> stays a table cell: making it a flex container drops it out of the
+   table layout, so its bottom border is drawn above the row separator and the
+   row background stops short of the cell edges. The "You" badge is aligned
+   with vertical-align instead (see .self-tag). */
+.td-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.td-email {
+  color: var(--color-muted-foreground);
+}
+
+.td-access {
+  min-width: 14rem;
+  color: #475569;
+}
+
+.td-actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.td-empty {
+  padding: 3rem 1.25rem;
+  text-align: center;
+  color: var(--color-muted-foreground);
+}
+
+/* ── Badges ────────────────────────────────────────────────── */
+
+.role-badge,
+.self-tag,
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1875rem 0.5rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.role-badge {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.self-tag {
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 0.6875rem;
+  /* Sits on the name's centre line without flexing the cell. */
+  vertical-align: middle;
+  margin-left: 0.5rem;
+}
+
+.status-badge {
+  text-transform: capitalize;
+}
+
+.status-badge[data-status='active'] {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.status-badge[data-status='inactive'] {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+/* ── Row actions ───────────────────────────────────────────── */
+
+.row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin-left: 0.125rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.row-action:hover:not(:disabled) {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.row-action--danger:hover:not(:disabled) {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.row-action:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+}
+
+/* Width only — no `display` override.
+ *
+ * `app-select` lays itself out (`:host { display: inline-flex; justify-content:
+ * space-between }`), and a display set here wins over it because the page's
+ * scoped rule outranks the component's `:host`. Forcing `inline-block` left the
+ * label top-aligned and the chevron parked right after it instead of against
+ * the right edge, which is what made these dropdowns look off next to every
+ * other select in the portal. */
+.filter-select,
+.page-size {
+  min-width: 10.5rem;
+}
+
+/* ── Footer: summary + page size + pagination ──────────────── */
+
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1.25rem;
+  background: #ffffff;
+  border-top: 1px solid var(--color-border);
+}
+
+.table-summary {
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+.table-controls {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-left: auto;
+}
+
+.pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.pagination-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 0.375rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: #475569;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pagination-btn:hover:not(:disabled):not(.is-current) {
+  background: #f1f5f9;
+}
+
+.pagination-btn:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+}
+
+.pagination-page.is-current {
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
+.pagination-gap {
+  padding: 0 0.125rem;
+  color: #94a3b8;
+}
+
+/* ── Empty states ──────────────────────────────────────────── */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+  background: #ffffff;
+  border-radius: var(--radius-xl);
+  border: 1px dashed var(--color-border);
+}
+
+/* Inside the card the toolbar sits above, so the dashed frame is redundant. */
+.empty-state--inset {
+  border: none;
+  border-radius: 0;
+}
+
+.empty-state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: var(--radius-full);
+  background: #f1f5f9;
+  color: var(--color-primary);
+  margin-bottom: 1.5rem;
+}
+
+.empty-state-title {
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+  margin: 0 0 0.5rem 0;
+}
+
+.empty-state-text {
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  color: var(--color-muted-foreground);
+  margin: 0;
+  max-width: 26rem;
+  line-height: 1.5;
+}
+
+/* ── Delete confirmation modal ─────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
+  animation: backdrop-fade-in 0.15s ease-out;
+}
+
+.modal-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 26rem;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 20px 35px -10px oklch(0 0 0 / 0.25);
+  overflow: hidden;
+  animation: dialog-enter 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes backdrop-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.25rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-title-area {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.modal-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.modal-title {
+  font-family: var(--font-heading);
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--color-foreground);
+  margin: 0;
+  line-height: 1.25;
+}
+
+.modal-subtitle {
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  color: var(--color-muted-foreground);
+  margin: 0.125rem 0 0;
+}
+
+.modal-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.modal-close-btn:hover {
+  background: var(--color-sidebar-accent);
+  color: var(--color-foreground);
+}
+
+.modal-body {
+  padding: 1.25rem;
+}
+
+.modal-message {
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  color: var(--color-card-foreground);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.625rem;
+  padding: 0.875rem 1.25rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-muted);
+}
+
+.btn-secondary,
+.btn-danger {
+  height: 36px;
+  padding: 0 1.25rem;
+  border-radius: var(--radius-lg);
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.btn-secondary {
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+}
+
+.btn-secondary:hover {
+  background: var(--color-secondary);
+}
+
+.btn-danger {
+  border: none;
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.btn-danger:hover {
+  background: #b91c1c;
+}
+
+/* One-time notices above the table: a generated password, or a failed change. */
+.inline-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+}
+
+.inline-notice--error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.inline-notice-text {
+  margin: 0;
+  font-size: 0.875rem;
+}

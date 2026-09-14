@@ -1,0 +1,147 @@
+/* ============================================================
+   Toast stack — mirrors the portal modal styling
+   (see lap-remedial-dialog.css and dashboard-layout.css)
+   ============================================================ */
+
+.toast-stack {
+  position: fixed;
+  /* Anchored to the bottom-right corner. The stack grows upwards from here, so
+     the newest message sits nearest the corner and older ones rise out of the
+     way — the same shape as the top-anchored version, read from the other end. */
+  bottom: 1rem;
+  right: 1rem;
+  /* Above the dialogs, which sit at 100: a message raised from inside a modal
+     must be visible, not hidden behind its own backdrop. A toast that can be
+     covered up is worse than no toast, so this deliberately outranks the whole
+     app — see the layering note in README.md. */
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: min(24rem, calc(100vw - 2rem));
+  /* The stack is a layout box only; clicks fall through to the page except on
+     the toasts themselves. */
+  pointer-events: none;
+}
+
+.toast-region {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.toast-region:empty {
+  display: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  pointer-events: auto;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--toast-accent, var(--color-border));
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 25px -8px oklch(0 0 0 / 0.28);
+  animation: toast-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toast-icon {
+  flex: none;
+  margin-top: 0.0625rem;
+  color: var(--toast-accent, var(--color-muted-foreground));
+}
+
+.toast-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.toast-message {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-card-foreground);
+  /* A long message (a server sentence, an employee name) must wrap rather than
+     push the dismiss button off-screen. */
+  overflow-wrap: anywhere;
+}
+
+.toast-detail {
+  margin: 0.25rem 0 0;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--color-muted-foreground);
+  overflow-wrap: anywhere;
+}
+
+.toast-dismiss {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* A comfortable hit target rather than a 16px glyph. */
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: -0.125rem -0.25rem 0 0;
+  font-family: var(--font-body);
+  font-size: 1.125rem;
+  line-height: 1;
+  color: var(--color-muted-foreground);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.toast-dismiss:hover {
+  color: var(--color-card-foreground);
+  background: var(--color-secondary);
+}
+
+.toast-dismiss:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+/* Variants — the accent drives the left border and the icon together. */
+.toast--success {
+  --toast-accent: var(--color-success);
+}
+
+.toast--error {
+  --toast-accent: var(--color-destructive);
+}
+
+.toast--warning {
+  --toast-accent: var(--color-warning);
+}
+
+.toast--info {
+  --toast-accent: var(--color-primary);
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}

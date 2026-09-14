@@ -1,0 +1,50 @@
+<!--
+  Two live regions inside one fixed wrapper. The wrapper positions them
+  together; keeping the regions separate is what lets an error be announced
+  assertively while a success waits its turn.
+-->
+<div class="toast-stack">
+  <div class="toast-region" role="status" aria-live="polite">
+    @for (toast of polite(); track toast.id) {
+      <div class="toast" [class]="'toast--' + toast.variant">
+        <ng-icon class="toast-icon" [name]="iconFor(toast.variant)" size="20" aria-hidden="true" />
+        <div class="toast-body">
+          <p class="toast-message">{{ toast.message }}</p>
+          @if (toast.detail; as detail) {
+            <p class="toast-detail">{{ detail }}</p>
+          }
+        </div>
+        <button
+          type="button"
+          class="toast-dismiss"
+          [attr.aria-label]="'Dismiss: ' + toast.message"
+          (click)="dismiss(toast)"
+        >
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+    }
+  </div>
+
+  <div class="toast-region" role="alert" aria-live="assertive">
+    @for (toast of assertive(); track toast.id) {
+      <div class="toast" [class]="'toast--' + toast.variant">
+        <ng-icon class="toast-icon" [name]="iconFor(toast.variant)" size="20" aria-hidden="true" />
+        <div class="toast-body">
+          <p class="toast-message">{{ toast.message }}</p>
+          @if (toast.detail; as detail) {
+            <p class="toast-detail">{{ detail }}</p>
+          }
+        </div>
+        <button
+          type="button"
+          class="toast-dismiss"
+          [attr.aria-label]="'Dismiss: ' + toast.message"
+          (click)="dismiss(toast)"
+        >
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+    }
+  </div>
+</div>

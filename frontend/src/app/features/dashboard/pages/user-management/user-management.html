@@ -1,0 +1,324 @@
+<div class="page-shell">
+  <!-- ── Header: title + Add user ────────────────────────────── -->
+  <div class="page-header">
+    <div class="page-heading">
+      <h2 class="page-title">User Management</h2>
+    </div>
+
+    <button type="button" class="btn-add" (click)="openAddDialog()">
+      <ng-icon name="reiconUserAdd" size="16" />
+      <span>Add user</span>
+    </button>
+  </div>
+
+  @if (temporaryPassword(); as password) {
+    <!-- Shown once: the API returns a generated password in this response only. -->
+    <div class="inline-notice" role="status">
+      <p class="inline-notice-text">
+        Temporary password for the new account: <strong>{{ password }}</strong> — share it now, it
+        cannot be shown again.
+      </p>
+      <button type="button" class="btn-secondary" (click)="dismissTemporaryPassword()">
+        Dismiss
+      </button>
+    </div>
+  }
+
+  @if (errorMessage(); as message) {
+    <div class="inline-notice inline-notice--error" role="alert">
+      <p class="inline-notice-text">{{ message }}</p>
+      <button type="button" class="btn-secondary" (click)="dismissError()">Dismiss</button>
+    </div>
+  }
+
+  @if (!hasUsers()) {
+    <!-- ── No accounts at all ────────────────────────────────── -->
+    <div class="empty-state">
+      <div class="empty-state-icon">
+        <ng-icon name="reiconUsers" size="40" />
+      </div>
+      <h3 class="empty-state-title">No user accounts yet</h3>
+      <p class="empty-state-text">
+        Click “Add user” to create the first portal account and choose the role and assignments it
+        starts with.
+      </p>
+    </div>
+  } @else {
+    <div class="table-card">
+      <!-- ── Toolbar: search + role / status filters ────────── -->
+      <div class="table-toolbar">
+        <div class="search-field">
+          <ng-icon name="reiconSearchNormal" size="16" class="search-icon" />
+          <input
+            type="text"
+            class="search-input"
+            placeholder="Search by name, employee ID or email"
+            aria-label="Search users"
+            [value]="search()"
+            (input)="onSearchInput($event)"
+          />
+          @if (search()) {
+            <button
+              type="button"
+              class="search-clear"
+              aria-label="Clear search"
+              title="Clear search"
+              (click)="clearSearch()"
+            >
+              <ng-icon name="reiconCloseCircle" size="16" />
+            </button>
+          }
+        </div>
+
+        <div class="toolbar-filters">
+          <app-select
+            class="filter-select"
+            [options]="roleFilterOptions()"
+            [value]="roleFilter()"
+            ariaLabel="Filter by role"
+            (valueChange)="onRoleFilterChange($event)"
+          />
+          <app-select
+            class="filter-select"
+            [options]="statusFilterOptions"
+            [value]="statusFilter()"
+            ariaLabel="Filter by status"
+            (valueChange)="onStatusFilterChange($event)"
+          />
+        </div>
+      </div>
+
+      @if (filteredUsers().length) {
+        <!-- ── Grid ──────────────────────────────────────────── -->
+        <div class="table-scroll">
+          <table class="user-table" aria-label="Portal users">
+            <thead>
+              <tr>
+                @for (header of headers(); track header.id) {
+                  <th
+                    scope="col"
+                    [attr.aria-sort]="header.column.getCanSort() ? ariaSort(header) : null"
+                    [attr.data-column]="header.column.id"
+                  >
+                    @if (header.column.getCanSort()) {
+                      <button
+                        type="button"
+                        class="th-sort"
+                        [attr.aria-label]="sortLabel(header)"
+                        (click)="onSort(header, $event)"
+                      >
+                        <span>{{ header.column.columnDef.header }}</span>
+                        <ng-icon
+                          [name]="sortIcon(header)"
+                          size="13"
+                          class="th-sort-icon"
+                          [class.is-active]="!!header.column.getIsSorted()"
+                        />
+                      </button>
+                    } @else {
+                      <span class="th-label">{{ header.column.columnDef.header }}</span>
+                    }
+                  </th>
+                }
+              </tr>
+            </thead>
+
+            <tbody>
+              @for (row of rows(); track row.id) {
+                <tr [class.is-self]="isSelf(row.original)">
+                  <td class="td-empid">{{ row.original.employeeId }}</td>
+                  <td class="td-name">
+                    <span>{{ row.original.name }}</span>
+                    @if (isSelf(row.original)) {
+                      <span class="self-tag">You</span>
+                    }
+                  </td>
+                  <td class="td-email">{{ row.original.email }}</td>
+                  <td class="td-role">
+                    <span class="role-badge">{{ roleLabel(row.original) }}</span>
+                  </td>
+                  <td class="td-access">{{ accessSummary(row.original) }}</td>
+                  <td class="td-status">
+                    <span class="status-badge" [attr.data-status]="row.original.status">
+                      {{ row.original.status }}
+                    </span>
+                  </td>
+                  <td class="td-actions">
+                    <button
+                      type="button"
+                      class="row-action"
+                      title="Edit user"
+                      [attr.aria-label]="'Edit ' + row.original.name"
+                      (click)="openEditDialog(row.original)"
+                    >
+                      <ng-icon name="reiconUserEdit" size="16" />
+                    </button>
+                    <!-- Your own account cannot be removed: it is how you stay signed in. -->
+                    <button
+                      type="button"
+                      class="row-action row-action--danger"
+                      [disabled]="isSelf(row.original)"
+                      [title]="
+                        isSelf(row.original) ? 'You cannot delete your own account' : 'Delete user'
+                      "
+                      [attr.aria-label]="'Delete ' + row.original.name"
+                      (click)="requestDelete(row.original)"
+                    >
+                      <ng-icon name="reiconTrash" size="16" />
+                    </button>
+                  </td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td class="td-empty" [attr.colspan]="columnCount()">
+                    No users match this search and filters.
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+
+        <!-- ── Footer: summary + rows per page + page controls ── -->
+        <div class="table-footer">
+          <span class="table-summary">{{ pageSummary() }}</span>
+
+          <div class="table-controls">
+            <app-select
+              class="page-size"
+              [options]="pageSizeOptions"
+              [value]="pageSizeValue()"
+              ariaLabel="Users per page"
+              (valueChange)="onPageSizeChange($event)"
+            />
+
+            <nav class="pagination-pages" aria-label="User list pagination">
+              <button
+                type="button"
+                class="pagination-btn"
+                [disabled]="!table.getCanPreviousPage()"
+                aria-label="First page"
+                (click)="goToFirstPage()"
+              >
+                <ng-icon name="reiconAnglesLeft" size="14" />
+              </button>
+              <button
+                type="button"
+                class="pagination-btn"
+                [disabled]="!table.getCanPreviousPage()"
+                aria-label="Previous page"
+                (click)="previousPage()"
+              >
+                <ng-icon name="reiconChevronLeft" size="14" />
+              </button>
+
+              @for (item of pageItems(); track item.key) {
+                @if (item.kind === 'page') {
+                  <button
+                    type="button"
+                    class="pagination-btn pagination-page"
+                    [class.is-current]="item.index === currentPage()"
+                    [attr.aria-current]="item.index === currentPage() ? 'page' : null"
+                    [attr.aria-label]="'Page ' + (item.index + 1)"
+                    (click)="goToPage(item.index)"
+                  >
+                    {{ item.index + 1 }}
+                  </button>
+                } @else {
+                  <span class="pagination-gap" aria-hidden="true">…</span>
+                }
+              }
+
+              <button
+                type="button"
+                class="pagination-btn"
+                [disabled]="!table.getCanNextPage()"
+                aria-label="Next page"
+                (click)="nextPage()"
+              >
+                <ng-icon name="reiconChevronRight" size="14" />
+              </button>
+              <button
+                type="button"
+                class="pagination-btn"
+                [disabled]="!table.getCanNextPage()"
+                aria-label="Last page"
+                (click)="goToLastPage()"
+              >
+                <ng-icon name="reiconAnglesRight" size="14" />
+              </button>
+            </nav>
+          </div>
+        </div>
+      } @else {
+        <!-- ── Filters match nothing ─────────────────────────── -->
+        <div class="empty-state empty-state--inset">
+          <div class="empty-state-icon">
+            <ng-icon name="reiconSearchNormal2" size="40" />
+          </div>
+          <h3 class="empty-state-title">No users found</h3>
+          <p class="empty-state-text">
+            No account matches the search text and filters. Clear the search to see every user
+            again.
+          </p>
+        </div>
+      }
+    </div>
+  }
+</div>
+
+<!-- ── Add / edit user (created per open, so every session starts clean) ── -->
+@if (isDialogOpen()) {
+  <app-user-edit-dialog
+    [user]="editingUser()"
+    [takenEmployeeIds]="takenEmployeeIds()"
+    [lockRole]="isEditingSelf()"
+    (save)="onDialogSave($event)"
+    (cancelled)="closeDialog()"
+  />
+}
+
+<!-- ── Delete confirmation ───────────────────────────────────── -->
+@if (pendingDelete(); as user) {
+  <div class="modal-backdrop" (click)="cancelDelete()">
+    <div
+      class="modal-dialog"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="delete-user-title"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="modal-header">
+        <div class="modal-title-area">
+          <span class="modal-icon-badge" aria-hidden="true">
+            <ng-icon name="reiconTrash" size="20" />
+          </span>
+          <div>
+            <h2 id="delete-user-title" class="modal-title">Delete user</h2>
+            <p class="modal-subtitle">{{ user.name }} &bull; {{ user.employeeId }}</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="modal-close-btn"
+          aria-label="Close dialog"
+          (click)="cancelDelete()"
+        >
+          <ng-icon name="reiconCloseCircle" size="20" />
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <p class="modal-message">
+          {{ user.name }} ({{ user.employeeId }}) loses access to {{ accessSummary(user) }}. This
+          cannot be undone.
+        </p>
+      </div>
+
+      <footer class="modal-footer">
+        <button type="button" class="btn-secondary" (click)="cancelDelete()">Cancel</button>
+        <button type="button" class="btn-danger" (click)="confirmDelete()">Delete user</button>
+      </footer>
+    </div>
+  </div>
+}

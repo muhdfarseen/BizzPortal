@@ -1,0 +1,77 @@
+<div class="modal-backdrop" (click)="onCancel()">
+  <div
+    class="modal-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="edit-results-title"
+    (click)="$event.stopPropagation()"
+  >
+    <header class="modal-header">
+      <div class="modal-title-area">
+        <span class="modal-icon-badge" aria-hidden="true">
+          <ng-icon name="reiconEdit" size="20" />
+        </span>
+        <div>
+          <h2 id="edit-results-title" class="modal-title">Edit assessment results</h2>
+          <p class="modal-subtitle">{{ trainee().name }} &bull; {{ trainee().employeeId }}</p>
+        </div>
+      </div>
+
+      <button type="button" class="modal-close-btn" aria-label="Close dialog" (click)="onCancel()">
+        <ng-icon name="reiconCloseCircle" size="20" />
+      </button>
+    </header>
+
+    <div class="modal-body">
+      <p class="modal-hint">
+        Exams are sat one at a time. Leave the ones still to come blank — only the scores you
+        enter are saved.
+      </p>
+
+      @for (draft of drafts(); track draft.exam.id) {
+        <div class="exam-row" [attr.data-exam]="draft.exam.id">
+          <h3 class="exam-name">{{ draft.exam.name }}</h3>
+
+          <div class="exam-fields">
+            <label class="field">
+              <span class="field-label">Score (0–{{ draft.exam.maxScore }})</span>
+              <input
+                class="score-input"
+                type="number"
+                inputmode="numeric"
+                step="1"
+                min="0"
+                [max]="draft.exam.maxScore"
+                [value]="draft.score"
+                [attr.aria-invalid]="scoreError(draft) ? 'true' : null"
+                (input)="onScoreInput(draft.exam.id, $event)"
+              />
+              @if (scoreError(draft); as error) {
+                <span class="field-error">{{ error }}</span>
+              }
+            </label>
+
+            <div class="field">
+              <span class="field-label">CEFR level</span>
+              <span
+                class="level-preview"
+                [attr.data-empty]="draft.level ? null : 'true'"
+                [style.background]="levelStyle(draft.level).background"
+                [style.color]="levelStyle(draft.level).color"
+              >
+                {{ draft.level ?? '—' }}
+              </span>
+            </div>
+          </div>
+        </div>
+      }
+    </div>
+
+    <footer class="modal-footer">
+      <button type="button" class="btn-secondary" (click)="onCancel()">Cancel</button>
+      <button type="button" class="btn-primary" [disabled]="!canSave()" (click)="onSave()">
+        Save changes
+      </button>
+    </footer>
+  </div>
+</div>

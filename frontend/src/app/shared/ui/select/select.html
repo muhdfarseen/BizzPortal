@@ -1,0 +1,17 @@
+@if (hasValue()) {
+  <span class="select-value">{{ selectedLabel() }}</span>
+} @else {
+  <span class="select-placeholder">{{ placeholder() }}</span>
+}
+
+<ng-icon name="reiconChevronDown" size="16" class="select-chevron" />
+
+<div *ngpSelectPortal ngpSelectDropdown>
+  @for (option of options(); track option.value) {
+    <div [ngpSelectOptionValue]="option.value" ngpSelectOption>
+      {{ option.label }}
+    </div>
+  } @empty {
+    <div class="select-empty">No options available</div>
+  }
+</div>

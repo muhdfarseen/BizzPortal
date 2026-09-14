@@ -1,0 +1,74 @@
+<div class="login-wrapper">
+  <!-- Background decoration -->
+  <div class="login-bg-pattern"></div>
+
+  <div class="login-card">
+    <!-- Logo -->
+    <div class="login-logo-wrap">
+      <img src="logo.svg" alt="TCS BizSkill Portal" class="login-logo" />
+    </div>
+
+    <!-- Form -->
+    <form (ngSubmit)="onSubmit()" class="login-form" autocomplete="on">
+      <!-- Employee ID -->
+      <div ngpFormField class="form-field">
+        <label ngpLabel for="employeeId">Employee ID</label>
+        <input
+          ngpInput
+          id="employeeId"
+          type="text"
+          placeholder="e.g. 100234"
+          [(ngModel)]="employeeId"
+          name="employeeId"
+          autocomplete="username"
+          class="input"
+          required
+        />
+      </div>
+
+      <!-- Password -->
+      <div ngpFormField class="form-field">
+        <label ngpLabel for="password">Password</label>
+        <div ngpPassword #passwordCtrl="ngpPassword" class="password-wrapper">
+          <input
+            ngpPasswordInput
+            id="password"
+            type="password"
+            placeholder="Enter your password"
+            [(ngModel)]="password"
+            name="password"
+            autocomplete="current-password"
+            class="input password-input"
+            required
+          />
+          <button
+            type="button"
+            ngpButton
+            ngpPasswordToggle
+            class="password-toggle"
+            [attr.aria-label]="passwordCtrl.isVisible() ? 'Hide password' : 'Show password'"
+          >
+            <ng-icon [name]="passwordCtrl.isVisible() ? 'reiconEyeOff' : 'reiconEye'" size="18" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Error -->
+      @if (error()) {
+        <div class="login-error">
+          {{ error() }}
+        </div>
+      }
+
+      <!-- Submit -->
+      <button ngpButton type="submit" class="btn-primary" [disabled]="loading()">
+        @if (loading()) {
+          <span class="spinner"></span>
+          Signing in…
+        } @else {
+          Sign In
+        }
+      </button>
+    </form>
+  </div>
+</div>

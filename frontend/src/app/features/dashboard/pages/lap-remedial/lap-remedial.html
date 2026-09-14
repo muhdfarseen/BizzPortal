@@ -1,0 +1,74 @@
+<div class="page-shell">
+  <div class="page-header">
+    <h2 class="page-title">LAP / Remedial</h2>
+    <app-filter-bar
+      [requireFullSelection]="true"
+      [exams]="exams()"
+      (filterChange)="onFilterChange($event)"
+      (search)="onSearch($event)"
+    />
+  </div>
+
+  @if (hasSearched()) {
+    @if (rows().length) {
+      <div class="track-tabs" role="tablist" aria-label="LAP / Remedial tracks">
+        @for (tab of trackTabs; track tab.status) {
+          <button
+            type="button"
+            role="tab"
+            class="track-tab"
+            [class.is-active]="activeTab() === tab.status"
+            [attr.aria-selected]="activeTab() === tab.status ? 'true' : 'false'"
+            (click)="selectTab(tab.status)"
+          >
+            {{ tab.label }}
+          </button>
+        }
+      </div>
+
+      @if (visibleRows().length) {
+        <section class="results" aria-label="LAP / Remedial trainees">
+          @if (isStale()) {
+            <p class="results-notice" role="status">Filters changed — search again to refresh.</p>
+          }
+
+          <app-assessment-table
+            [data]="visibleRows()"
+            [exams]="selectedExams()"
+            [actions]="rowActions()"
+            [showStartDate]="showsTrackColumns()"
+            [showRemark]="showsTrackColumns()"
+            (action)="onAction($event)"
+          />
+        </section>
+      } @else {
+        <div class="empty-state">
+          <p>{{ emptyTabHint() }}</p>
+        </div>
+      }
+    } @else {
+      <div class="empty-state">
+        <p>No trainees found for the selected location, batch and LG.</p>
+      </div>
+    }
+  } @else {
+    <div class="empty-state">
+      <div class="empty-state-icon">
+        <ng-icon name="reiconSearchNormal2" size="40" />
+      </div>
+      <h3 class="empty-state-title">Select filters to search</h3>
+      <p class="empty-state-text">
+        Please choose a Location and LG from the filters above and click Search to load the trainee
+        records.
+      </p>
+    </div>
+  }
+</div>
+
+@if (confirming(); as request) {
+  <app-lap-remedial-dialog
+    [request]="request"
+    (confirm)="onConfirm($event)"
+    (cancelled)="closeDialog()"
+  />
+}

@@ -1,0 +1,303 @@
+/* ============================================================
+   BizSkill Portal — Global Design System
+   Tailwind CSS v4 + CSS Custom Properties
+   Theme inspiration: shadcn "Mira"
+   ============================================================ */
+
+@import 'tailwindcss';
+
+/* ── Custom Theme Tokens ────────────────────────────────────── */
+@theme {
+  /* ── Typography ─────────────────────────────────────────── */
+  --font-heading: 'Nunito', sans-serif;
+  --font-body: 'Calibri', 'Segoe UI', system-ui, sans-serif;
+
+  /* ── Colors — Brand & TCS Blue Palette ─────────────────── */
+  --color-primary: #2469bc;
+  --color-primary-hover: #1d5ba3;
+  --color-primary-active: #184d8a;
+  --color-primary-light: #d3e1f0; /* Pantone 2707 C • Lightest tint */
+  --color-primary-foreground: #ffffff;
+
+  /* TCS Blue Official Palette (Pantone Swatch) */
+  --color-tcs-dark: #3e6a9d; /* Pantone 653 C  • RGB 62/106/157  • CMYK 85/58/16/1 */
+  --color-tcs-blue: #4e84c4; /* Pantone 2727 C • RGB 78/132/196  • CMYK 90/60/0/0 (TCS Blue) */
+  --color-tcs-medium: #7ba3d3; /* Pantone 659 C  • RGB 123/163/211 • CMYK 55/26/0/0 */
+  --color-tcs-soft: #a9c2e2; /* Pantone 2717 C • RGB 169/194/226 • CMYK 34/14/0/0 */
+  --color-tcs-light: #d3e1f0; /* Pantone 2707 C • RGB 211/225/240 • CMYK 16/6/1/0 */
+
+  /* Scale aliases */
+  --color-primary-900: #3e6a9d;
+  --color-primary-700: #4e84c4;
+  --color-primary-500: #7ba3d3;
+  --color-primary-300: #a9c2e2;
+  --color-primary-100: #d3e1f0;
+
+  /* ── Colors — Neutral (shadcn-style) ────────────────────── */
+  --color-background: #f5f5f5;
+  --color-foreground: oklch(0.145 0 0);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.145 0 0);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.145 0 0);
+  --color-secondary: oklch(0.97 0 0);
+  --color-secondary-foreground: oklch(0.205 0 0);
+  --color-muted: oklch(0.97 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+  --color-accent: oklch(0.97 0 0);
+  --color-accent-foreground: oklch(0.205 0 0);
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-destructive-foreground: #ffffff;
+  /* Feedback palette. `--color-success` and `--color-warning` exist for the
+     toast variants; the greens are kept legible against a white card, which the
+     CEFR badge greens are not (they sit on tinted chips). */
+  --color-success: oklch(0.527 0.154 150.069);
+  --color-success-foreground: #ffffff;
+  --color-warning: oklch(0.666 0.179 58.318);
+  --color-warning-foreground: #ffffff;
+  --color-border: oklch(0.922 0 0);
+  --color-input: oklch(0.922 0 0);
+  --color-ring: oklch(0.708 0 0);
+  --color-chart-1: oklch(0.87 0 0);
+  --color-chart-2: oklch(0.556 0 0);
+  --color-chart-3: oklch(0.439 0 0);
+  --color-chart-4: oklch(0.371 0 0);
+  --color-chart-5: oklch(0.269 0 0);
+
+  /* ── Sidebar-specific ───────────────────────────────────── */
+  --color-sidebar: oklch(0.985 0 0);
+  --color-sidebar-foreground: oklch(0.145 0 0);
+  --color-sidebar-border: oklch(0.922 0 0);
+  --color-sidebar-accent: oklch(0.97 0 0);
+  --color-sidebar-accent-foreground: oklch(0.205 0 0);
+  --color-sidebar-muted-foreground: oklch(0.556 0 0);
+
+  /* ── Radius ────────────────── */
+  --radius-sm: 0.375rem; /* 6px */
+  --radius-md: 0.5rem; /* 8px  — default for cards, inputs */
+  --radius-lg: 0.625rem; /* 10px — buttons, larger elements  */
+  --radius-xl: 0.75rem; /* 12px */
+  --radius-2xl: 1rem; /* 16px */
+  --radius-full: 9999px;
+}
+
+/* ── Angular Primitives — Clean Minimal Theme ───────────────── */
+/*                                                             */
+/* Mirrors ng-primitives/example-theme/index.css (the theme     */
+/* behind the Angular Primitives docs examples and generated    */
+/* components), with the library's red primary accent           */
+/* (#f01e2b light / #ff4651 dark) swapped for the BizSkill      */
+/* blue primary (--color-primary). Every ng-primitives          */
+/* primitive exposes its state through data-* attributes and    */
+/* styles itself from these --ngp-* custom properties.          */
+
+:root {
+  --ngp-white: oklch(1 0.001 0.001);
+  --ngp-black: oklch(0 0.001 0.001);
+
+  --ngp-gray-50: oklch(0.985 0 0);
+  --ngp-gray-100: oklch(0.967 0.001 286.375);
+  --ngp-gray-200: oklch(0.92 0.004 286.32);
+  --ngp-gray-300: oklch(0.871 0.006 286.286);
+  --ngp-gray-400: oklch(0.705 0.015 286.067);
+  --ngp-gray-500: oklch(0.552 0.016 285.938);
+  --ngp-gray-600: oklch(0.442 0.017 285.786);
+  --ngp-gray-700: oklch(0.37 0.013 285.805);
+  --ngp-gray-800: oklch(0.274 0.006 286.033);
+  --ngp-gray-900: oklch(0.21 0.006 285.885);
+  --ngp-gray-950: oklch(0.141 0.005 285.823);
+
+  /* Surfaces — minimal white */
+  --ngp-background: var(--ngp-white);
+  --ngp-background-secondary: var(--ngp-gray-300);
+  --ngp-background-hover: var(--ngp-gray-50);
+  --ngp-background-active: var(--ngp-gray-100);
+  --ngp-background-inverse: var(--ngp-black);
+  --ngp-background-disabled: var(--ngp-gray-100);
+  --ngp-background-blue: var(--color-primary-light);
+  --ngp-background-success: oklch(84.1% 0.238 128.85);
+
+  /* Primary accent — BizSkill blue (replaces ng-primitives red) */
+  --ngp-primary: var(--color-primary);
+  --ngp-primary-hover: var(--color-primary-hover);
+  --ngp-primary-active: var(--color-primary-active);
+  --ngp-primary-text: var(--color-primary-foreground);
+
+  --ngp-border: rgba(0, 0, 0, 0.1);
+  --ngp-border-secondary: var(--ngp-gray-300);
+  --ngp-border-blue: var(--color-tcs-blue);
+  --ngp-border-inverse: var(--ngp-black);
+
+  --ngp-text-emphasis: var(--ngp-black);
+  --ngp-text-primary: var(--ngp-gray-900);
+  --ngp-text-secondary: var(--ngp-gray-600);
+  --ngp-text-tertiary: var(--ngp-gray-500);
+  --ngp-text-disabled: var(--ngp-gray-400);
+  --ngp-text-placeholder: var(--ngp-gray-400);
+  --ngp-text-inverse: var(--ngp-white);
+  --ngp-text-blue: var(--color-primary);
+  --ngp-text-red: #ef4444;
+
+  --ngp-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --ngp-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --ngp-shadow-border: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+
+  /* The example theme uses rgb(59 130 246) — mapped to the brand blue */
+  --ngp-focus-ring: var(--color-primary);
+
+  --ngp-avatar-background: var(--color-primary-light);
+  --ngp-avatar-border: #ffffff;
+
+  --ngp-button-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1), 0 0 0 1px rgb(0 0 0 / 0.05);
+
+  --ngp-input-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+/* Dark mode — identical to the example theme apart from the accent,
+   which is a lighter BizSkill blue in place of the red. Only applies
+   when a `.dark` class is present (the app ships light mode today). */
+.dark {
+  --ngp-background: var(--ngp-gray-950);
+  --ngp-background-secondary: var(--ngp-gray-700);
+  --ngp-background-hover: var(--ngp-gray-900);
+  --ngp-background-active: var(--ngp-gray-800);
+  --ngp-background-inverse: var(--ngp-white);
+  --ngp-background-disabled: var(--ngp-gray-900);
+  --ngp-background-blue: rgba(95, 160, 246, 0.274);
+
+  --ngp-primary: #5b9ce6;
+  --ngp-primary-hover: #7ab0ee;
+  --ngp-primary-active: #3f86d4;
+
+  --ngp-border: var(--ngp-gray-800);
+  --ngp-border-secondary: var(--ngp-gray-700);
+  --ngp-border-blue: #4e84c4;
+  --ngp-border-inverse: var(--ngp-white);
+
+  --ngp-text-emphasis: var(--ngp-white);
+  --ngp-text-primary: var(--ngp-gray-100);
+  --ngp-text-secondary: var(--ngp-gray-300);
+  --ngp-text-tertiary: var(--ngp-gray-400);
+  --ngp-text-disabled: var(--ngp-gray-500);
+  --ngp-text-inverse: var(--ngp-black);
+  --ngp-text-blue: #5b9ce6;
+  --ngp-text-red: #ff4d4d;
+
+  --ngp-avatar-background: #18181b;
+  --ngp-avatar-border: #3f3f46;
+
+  --ngp-shadow-border: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --ngp-input-shadow: 0 1px 2px rgba(255, 255, 255, 0.007), 0 0 0 1px rgba(255, 255, 255, 0.1);
+
+  --ngp-button-shadow:
+    0 1px 3px 0 rgb(255 255 255 / 0.1), 0 1px 2px -1px rgb(255 255 255 / 0.1),
+    0 0 0 1px rgb(255 255 255 / 0.05);
+}
+
+/* ── Base Reset & Typography ────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  border-color: var(--color-border);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.875rem; /* 14px base — Mira style */
+  line-height: 1.5;
+  color: var(--color-foreground);
+  background-color: var(--color-background);
+}
+
+/* ── Headings: Nunito Semibold ──────────────────────────────── */
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  color: var(--color-foreground);
+  line-height: 1.25;
+  margin: 0;
+}
+
+h1 {
+  font-size: 2.25rem;
+} /* 36px */
+h2 {
+  font-size: 1.875rem;
+} /* 30px */
+h3 {
+  font-size: 1.5rem;
+} /* 24px */
+h4 {
+  font-size: 1.25rem;
+} /* 20px */
+h5 {
+  font-size: 1.125rem;
+} /* 18px */
+h6 {
+  font-size: 1rem;
+} /* 16px */
+
+/* ── Links ──────────────────────────────────────────────────── */
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ── Global Focus Ring ──────────────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Scrollbar (subtle) ─────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-muted-foreground);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-foreground);
+}
+
+/* ── Icon stroke fixes (icons authored with stroke only) ───── */
+/* Reicon "default" set stroke-based icons set stroke="currentColor"
+   on each <path> but omit fill="none", so browsers apply SVG's
+   default fill of black — making icons appear solid.  This strips
+   that default from elements that already carry a stroke attr.   */
+
+ng-icon svg [stroke],
+ng-icon svg[stroke] {
+  fill: none !important;
+}

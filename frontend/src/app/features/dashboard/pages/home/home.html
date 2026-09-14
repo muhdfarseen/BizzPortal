@@ -1,0 +1,104 @@
+<div class="page-shell">
+  <!-- Page Header: Title and Right-aligned Filters -->
+  <div class="page-header">
+    <h2 class="page-title">Home</h2>
+    <app-filter-bar
+      [showSearch]="false"
+      [allowAll]="true"
+      (filterChange)="onFilterChange($event)"
+    />
+  </div>
+
+  <!-- Shown instead of the figures when the API could not be reached: zeroes
+       would read as "no trainees", which is a different claim. -->
+  @if (loadFailed()) {
+    <p class="load-notice" role="status">
+      The dashboard figures could not be loaded. Check your connection and try again.
+    </p>
+  }
+
+  <!-- 4 Data Dashboard Cards -->
+  <div class="content-grid">
+    <div class="stat-card">
+      <div class="stat-card-info">
+        <span class="stat-label">Total Batch</span>
+        <span class="stat-value">{{ metrics().totalBatch }}</span>
+      </div>
+      <div class="stat-icon-wrapper stat-icon-batch" aria-hidden="true">
+        <ng-icon name="reiconLayers" size="22" />
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-info">
+        <span class="stat-label">Total Trainee</span>
+        <span class="stat-value">{{ metrics().totalTrainee }}</span>
+      </div>
+      <div class="stat-icon-wrapper stat-icon-trainee" aria-hidden="true">
+        <ng-icon name="reiconUsers" size="22" />
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-info">
+        <span class="stat-label">Remedial Count</span>
+        <span class="stat-value stat-value-remedial">{{ metrics().remedialCount }}</span>
+      </div>
+      <div class="stat-icon-wrapper stat-icon-remedial" aria-hidden="true">
+        <ng-icon name="reiconBookOpen" size="22" />
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-info">
+        <span class="stat-label">LAP Count</span>
+        <span class="stat-value stat-value-lap">{{ metrics().lapCount }}</span>
+      </div>
+      <div class="stat-icon-wrapper stat-icon-lap" aria-hidden="true">
+        <ng-icon name="reiconClipboardList" size="22" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Donut Chart & Location Distribution Table Card -->
+  <div class="chart-card">
+    <div class="donut-chart-layout">
+      <!-- Donut Visual with Center Metric Overlay -->
+      <div class="donut-visual-container">
+        <div #chartContainer class="tanstack-donut-chart"></div>
+        <div class="donut-center-badge">
+          <span class="donut-center-value">{{ metrics().totalTrainee }}</span>
+          <span class="donut-center-label">Total Trainees</span>
+        </div>
+      </div>
+
+      <!-- Right Side: Location Distribution Table -->
+      <div class="table-section-container">
+        <div class="table-scroll-wrapper">
+          <table class="location-summary-table" aria-label="Trainee distribution by location">
+            <thead>
+              <tr>
+                <th class="th-location">Location</th>
+                <th class="th-num">Total Batch</th>
+                <th class="th-num">Total Trainee</th>
+                <th class="th-num">Remedial</th>
+                <th class="th-num">LAP</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of locationSummaries(); track row.locationName) {
+                <tr>
+                  <td class="td-location">{{ row.locationName }}</td>
+                  <td class="td-num td-batch">{{ row.totalBatch }}</td>
+                  <td class="td-num td-total">{{ row.totalTrainee }}</td>
+                  <td class="td-num td-remedial">{{ row.remedialCount }}</td>
+                  <td class="td-num td-lap">{{ row.lapCount }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

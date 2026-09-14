@@ -1,0 +1,164 @@
+<div
+  ngpTabset
+  [ngpTabsetValue]="currentTab()"
+  (ngpTabsetValueChange)="onTabChange($event)"
+  (scroll)="closeUserMenu()"
+  class="dashboard-layout-container"
+>
+  <!-- ── Main Top Bar ─────────────────────────────────────────── -->
+  <header class="main-header">
+    <div class="header-left">
+      <img src="logo.svg" alt="TCS BizSkill Portal" class="header-logo" />
+    </div>
+
+    <div class="header-right">
+      <!-- User Profile Dropdown Trigger (Name + Emp ID on left, Avatar on right, no stroke/arrow) -->
+      <div class="user-menu-container">
+        <button
+          ngpButton
+          class="header-profile-btn"
+          (click)="toggleUserMenu($event)"
+          [attr.aria-expanded]="isUserMenuOpen()"
+          aria-haspopup="true"
+          aria-label="User account menu"
+        >
+          <div class="header-user-info">
+            <span class="header-user-name">{{ userName() }}</span>
+            <span class="header-user-id">{{ employeeId() }}</span>
+          </div>
+
+          <div ngpAvatar class="header-avatar">
+            <span ngpAvatarFallback class="avatar-letter">{{ userInitial() }}</span>
+          </div>
+        </button>
+
+        <!-- Dropdown Menu -->
+        @if (isUserMenuOpen()) {
+          <div class="user-dropdown-menu" role="menu">
+            <!-- View Permissions action -->
+            <button
+              ngpButton
+              class="dropdown-item"
+              (click)="openPermissionsModal()"
+              role="menuitem"
+            >
+              <ng-icon name="reiconShieldCheck" size="18" class="dropdown-item-icon" />
+              <span>View Permissions</span>
+            </button>
+
+            <div class="dropdown-divider"></div>
+
+            <!-- Logout action -->
+            <button ngpButton class="dropdown-item logout-item" (click)="logout()" role="menuitem">
+              <ng-icon name="reiconLogout" size="18" class="dropdown-item-icon" />
+              <span>Logout</span>
+            </button>
+          </div>
+        }
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Secondary Navigation / Tab Selection Bar ────────────── -->
+  <nav class="sub-nav-bar" aria-label="Main Navigation">
+    <!-- One tab list keeps arrow-key navigation working; the Super Admin tabs
+         are pushed to the right edge by the divider's auto margin. -->
+    <div ngpTabList class="tabs-container">
+      @for (item of visibleNavItems(); track item.id) {
+        @if (item.id === firstAdminTabId()) {
+          <span class="nav-divider" aria-hidden="true"></span>
+        }
+        <button
+          ngpTabButton
+          [ngpTabButtonValue]="item.id"
+          class="tab-item"
+          [class.active]="currentTab() === item.id"
+        >
+          <span class="tab-icon">
+            <ng-icon [name]="item.icon" size="18" />
+          </span>
+          <span class="tab-label">{{ item.label }}</span>
+        </button>
+      }
+    </div>
+  </nav>
+
+  <!-- ── Main Content Area ───────────────────────────────────── -->
+  <main class="main-content">
+    <div ngpTabPanel [ngpTabPanelValue]="currentTab()" class="tab-panel-container">
+      <router-outlet />
+    </div>
+  </main>
+</div>
+
+<!-- ── Permissions Modal ────────────────────────────────────── -->
+@if (isPermissionsModalOpen()) {
+  <div class="modal-backdrop" (click)="closePermissionsModal()">
+    <div
+      class="modal-dialog"
+      (click)="$event.stopPropagation()"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="perm-title"
+    >
+      <div class="modal-header">
+        <div class="modal-title-area">
+          <div class="modal-icon-badge">
+            <ng-icon name="reiconShieldCheck" size="20" />
+          </div>
+          <div>
+            <h2 id="perm-title" class="modal-title">Employee Permissions</h2>
+            <p class="modal-subtitle">{{ userName() }} &bull; {{ employeeId() }}</p>
+          </div>
+        </div>
+        <button
+          ngpButton
+          class="modal-close-btn"
+          (click)="closePermissionsModal()"
+          aria-label="Close modal"
+        >
+          <ng-icon name="reiconCloseCircle" size="20" />
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="role-badge-row">
+          <span class="role-badge">Role: {{ roleLabel() }}</span>
+          <span class="status-indicator">
+            <span class="status-dot"></span>
+            <span>{{
+              hasAllPermissions()
+                ? 'All permissions active'
+                : permissions().length + ' permissions active'
+            }}</span>
+          </span>
+        </div>
+
+        @if (isScoped()) {
+          <p class="assigned-access">
+            <span class="assigned-access-label">Assigned access</span>
+            <span class="assigned-access-value">{{ assignedAccess() }}</span>
+          </p>
+        }
+
+        <ul class="permissions-list">
+          @for (perm of permissions(); track perm.id) {
+            <li class="permission-item">
+              <span class="perm-check">
+                <ng-icon name="reiconCheck" size="16" />
+              </span>
+              <div class="perm-text">
+                <span class="perm-name">{{ perm.label }}</span>
+                <span class="perm-desc">{{ perm.description }}</span>
+              </div>
+            </li>
+          }
+        </ul>
+      </div>
+
+      <div class="modal-footer">
+        <button ngpButton class="modal-done-btn" (click)="closePermissionsModal()">Done</button>
+      </div>
+    </div>
+  </div>
+}

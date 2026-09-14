@@ -1,0 +1,98 @@
+<div class="filter-bar">
+  <!-- Location -->
+  <div class="filter-group">
+    <span class="filter-label">LOCATION</span>
+    <app-select
+      [options]="locationOptions()"
+      [value]="selectedLocationId()"
+      [placeholder]="allowAll() ? 'All' : 'Select Location'"
+      ariaLabel="Location"
+      (valueChange)="onLocationChange($event)"
+    />
+  </div>
+
+  <!-- Batch -->
+  <div class="filter-group" [class.disabled]="isBatchDisabled()">
+    <span class="filter-label">BATCH</span>
+    <app-select
+      [options]="batchOptions()"
+      [value]="selectedBatchId()"
+      [disabled]="isBatchDisabled()"
+      [placeholder]="
+        allowAll() ? 'All' : isBatchDisabled() ? 'Select Location first' : 'Select Batch'
+      "
+      ariaLabel="Batch"
+      (valueChange)="onBatchChange($event)"
+    />
+  </div>
+
+  <!-- LG -->
+  <div class="filter-group" [class.disabled]="isLgDisabled()">
+    <span class="filter-label">LG</span>
+    <app-select
+      [options]="lgOptions()"
+      [value]="selectedLgId()"
+      [disabled]="isLgDisabled()"
+      [placeholder]="allowAll() ? 'All' : isLgDisabled() ? 'Select Batch first' : 'Select LG'"
+      ariaLabel="LG"
+      (valueChange)="onLgChange($event)"
+    />
+  </div>
+
+  @if (exams().length) {
+    <div class="filter-group exam-filter-group">
+      <span class="filter-label">EXAMS</span>
+      <div class="exam-multi-select">
+        <button
+          type="button"
+          class="exam-multi-trigger"
+          [attr.aria-expanded]="isExamMenuOpen()"
+          aria-haspopup="listbox"
+          aria-label="Exams"
+          (click)="isExamMenuOpen.set(!isExamMenuOpen())"
+        >
+          <span>{{ selectedExamLabel() }}</span>
+          <ng-icon name="reiconChevronDown" size="16" class="exam-multi-chevron" />
+        </button>
+
+        @if (isExamMenuOpen()) {
+          <div
+            class="exam-multi-menu"
+            role="listbox"
+            aria-label="Select exams"
+            aria-multiselectable="true"
+          >
+            @for (exam of examOptions(); track exam.value) {
+              <label class="exam-option">
+                <input
+                  type="checkbox"
+                  [checked]="isExamSelected(exam.value)"
+                  (change)="toggleExam(exam.value)"
+                />
+                <span>{{ exam.label }}</span>
+              </label>
+            }
+          </div>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- Search Action (Only rendered when showSearch is true) -->
+  @if (showSearch()) {
+    <button
+      type="button"
+      class="filter-search-btn"
+      [disabled]="isSearchDisabled()"
+      [attr.title]="
+        isSearchDisabled()
+          ? 'Select a location, batch and LG (and at least one exam) to search'
+          : null
+      "
+      (click)="onSearch()"
+    >
+      <ng-icon name="reiconSearch" size="16" class="filter-search-icon" />
+      <span>Search</span>
+    </button>
+  }
+</div>

@@ -1,0 +1,225 @@
+<div class="table-card">
+  <!-- ── Search ─────────────────────────────────────────────── -->
+  <div class="table-toolbar">
+    <div class="table-search">
+      <ng-icon name="reiconSearchNormal2" size="15" class="table-search-icon" aria-hidden="true" />
+      <input
+        type="search"
+        class="table-search-input"
+        [value]="query()"
+        placeholder="Search by name or employee ID"
+        aria-label="Search trainees by name or employee ID"
+        (input)="onSearchInput($event)"
+      />
+      @if (isSearching()) {
+        <button
+          type="button"
+          class="table-search-clear"
+          aria-label="Clear search"
+          title="Clear search"
+          (click)="clearSearch()"
+        >
+          <ng-icon name="reiconCloseCircle" size="15" />
+        </button>
+      }
+    </div>
+  </div>
+
+  <!-- ── Grid ───────────────────────────────────────────────── -->
+  <div class="table-scroll">
+    <table class="assessment-table" aria-label="Trainee assessment results">
+      <thead>
+        <tr>
+          @for (header of headerGroups()[0].headers; track header.id) {
+            <th
+              scope="col"
+              [attr.aria-sort]="header.column.getCanSort() ? ariaSort(header) : null"
+              [attr.data-column]="header.column.id"
+            >
+              @if (header.column.getCanSort()) {
+                <button
+                  type="button"
+                  class="th-sort"
+                  [attr.aria-label]="sortLabel(header)"
+                  (click)="onSort(header, $event)"
+                >
+                  <span>{{ header.column.columnDef.header }}</span>
+                  <ng-icon
+                    [name]="sortIcon(header)"
+                    size="13"
+                    class="th-sort-icon"
+                    [class.is-active]="header.column.getIsSorted()"
+                  />
+                </button>
+              } @else {
+                <span class="th-label">{{ header.column.columnDef.header }}</span>
+              }
+            </th>
+          }
+        </tr>
+      </thead>
+
+      <tbody>
+        @for (row of rows(); track row.id) {
+          <tr>
+            <td class="td-empid">{{ row.original.employeeId }}</td>
+            <td class="td-name">{{ row.original.name }}</td>
+
+            @for (exam of exams(); track exam.id) {
+              @let result = row.original.results[exam.id];
+              <td class="td-result" [attr.title]="resultTitle(exam, result)">
+                @if (result) {
+                  <div class="result">
+                    <span class="result-score">{{ result.score }}</span>
+                    <span
+                      class="cefr-pill"
+                      [attr.data-level]="result.cefr"
+                      [style.background]="pillStyle(result.cefr).background"
+                      [style.color]="pillStyle(result.cefr).color"
+                      >{{ result.cefr }}</span
+                    >
+                  </div>
+                } @else {
+                  <span class="result-pending">—</span>
+                }
+              </td>
+            }
+
+            @if (showStartDate()) {
+              <td class="td-start-date">
+                @if (row.original.startDate; as startDate) {
+                  {{ startDateLabel(startDate) }}
+                } @else {
+                  <span class="result-pending">—</span>
+                }
+              </td>
+            }
+
+            @if (showRemark()) {
+              <td class="td-remark">
+                @if (row.original.remark; as remark) {
+                  {{ remark }}
+                } @else {
+                  <span class="result-pending">—</span>
+                }
+              </td>
+            }
+
+            @if (actions().length) {
+              <td class="td-actions">
+                @for (rowAction of actions(); track rowAction.id) {
+                  @if (rowAction.icon) {
+                    <button
+                      type="button"
+                      class="row-action"
+                      [attr.aria-label]="rowAction.label + ' — ' + row.original.name"
+                      [title]="rowAction.label"
+                      (click)="onAction(rowAction, row.original)"
+                    >
+                      <ng-icon [name]="rowAction.icon" size="16" />
+                    </button>
+                  } @else {
+                    <button
+                      type="button"
+                      class="row-action-text"
+                      [attr.data-variant]="rowAction.variant ?? 'secondary'"
+                      (click)="onAction(rowAction, row.original)"
+                    >
+                      {{ rowAction.label }}
+                    </button>
+                  }
+                }
+              </td>
+            }
+          </tr>
+        } @empty {
+          <tr>
+            <td class="td-empty" [attr.colspan]="columnCount()">
+              @if (isSearching()) {
+                No trainees match “{{ query().trim() }}”.
+                <button type="button" class="td-empty-clear" (click)="clearSearch()">
+                  Clear search
+                </button>
+              } @else {
+                No trainees match this selection.
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── Footer: summary (left), rows per page + page controls (right) ── -->
+  <div class="table-footer">
+    <!-- `role="status"` so the result count is announced as the user types. -->
+    <span class="table-summary" role="status">{{ pageSummary() }}</span>
+
+    <div class="table-controls">
+      <app-select
+        class="page-size"
+        [options]="pageSizeOptions"
+        [value]="pageSizeValue()"
+        ariaLabel="Rows per page"
+        (valueChange)="onPageSizeChange($event)"
+      />
+
+      <nav class="pagination-pages" aria-label="Assessment results pagination">
+        <button
+          type="button"
+          class="pagination-btn"
+          [disabled]="!table.getCanPreviousPage()"
+          aria-label="First page"
+          (click)="goToFirstPage()"
+        >
+          <ng-icon name="reiconAnglesLeft" size="14" />
+        </button>
+        <button
+          type="button"
+          class="pagination-btn"
+          [disabled]="!table.getCanPreviousPage()"
+          aria-label="Previous page"
+          (click)="previousPage()"
+        >
+          <ng-icon name="reiconChevronLeft" size="14" />
+        </button>
+
+        @for (item of pageItems(); track item.key) {
+          @if (item.kind === 'page') {
+            <button
+              type="button"
+              class="pagination-btn pagination-page"
+              [class.is-current]="item.index === currentPage()"
+              [attr.aria-current]="item.index === currentPage() ? 'page' : null"
+              [attr.aria-label]="'Page ' + (item.index + 1)"
+              (click)="goToPage(item.index)"
+            >
+              {{ item.index + 1 }}
+            </button>
+          } @else {
+            <span class="pagination-gap" aria-hidden="true">…</span>
+          }
+        }
+
+        <button
+          type="button"
+          class="pagination-btn"
+          [disabled]="!table.getCanNextPage()"
+          aria-label="Next page"
+          (click)="nextPage()"
+        >
+          <ng-icon name="reiconChevronRight" size="14" />
+        </button>
+        <button
+          type="button"
+          class="pagination-btn"
+          [disabled]="!table.getCanNextPage()"
+          aria-label="Last page"
+          (click)="goToLastPage()"
+        >
+          <ng-icon name="reiconAnglesRight" size="14" />
+        </button>
+      </nav>
+    </div>
+  </div>
+</div>

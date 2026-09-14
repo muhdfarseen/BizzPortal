@@ -1,0 +1,54 @@
+<div class="modal-backdrop" (click)="onCancel()">
+  <div
+    class="modal-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="lap-remedial-title"
+    (click)="$event.stopPropagation()"
+  >
+    <header class="modal-header">
+      <div class="modal-title-area">
+        <span class="modal-icon-badge" aria-hidden="true">
+          <ng-icon name="reiconArrowSwapHorizontal" size="20" />
+        </span>
+        <div>
+          <h2 id="lap-remedial-title" class="modal-title">{{ request().title }}</h2>
+          <p class="modal-subtitle">
+            {{ request().trainee.name }} &bull; {{ request().trainee.employeeId }}
+          </p>
+        </div>
+      </div>
+
+      <button type="button" class="modal-close-btn" aria-label="Close dialog" (click)="onCancel()">
+        <ng-icon name="reiconCloseCircle" size="20" />
+      </button>
+    </header>
+
+    <div class="modal-body">
+      <p class="confirm-text">{{ confirmText() }}</p>
+
+      <label class="field">
+        <span class="field-label">{{ dateLabel() }}</span>
+        <input type="date" class="date-input" [value]="date()" (input)="onDateInput($event)" />
+      </label>
+
+      <label class="field">
+        <span class="field-label">Remark</span>
+        <textarea
+          class="remark-input"
+          rows="3"
+          placeholder="Record why this change is being made"
+          [value]="remark()"
+          (input)="onRemarkInput($event)"
+        ></textarea>
+      </label>
+    </div>
+
+    <footer class="modal-footer">
+      <button type="button" class="btn-secondary" (click)="onCancel()">Cancel</button>
+      <button type="button" class="btn-primary" [disabled]="!canConfirm()" (click)="onConfirm()">
+        {{ request().title }}
+      </button>
+    </footer>
+  </div>
+</div>

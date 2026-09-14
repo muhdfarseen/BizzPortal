@@ -1,0 +1,225 @@
+<div class="config-layout">
+  <!-- ── Sidebar ──────────────────────────────────────────── -->
+  <aside class="config-sidebar">
+    <h3 class="sidebar-heading">Configuration</h3>
+    <nav class="sidebar-nav">
+      @for (item of sidebarItems; track item.id) {
+        <button
+          type="button"
+          class="sidebar-item"
+          [class.is-active]="activeSidebarItem() === item.id"
+          (click)="selectSidebarItem(item.id)"
+        >
+          <ng-icon [name]="item.icon" size="18" />
+          <span>{{ item.label }}</span>
+        </button>
+      }
+    </nav>
+  </aside>
+
+  <!-- ── Content ──────────────────────────────────────────── -->
+  <main class="config-content">
+    @if (activeSidebarItem() === 'assessments') {
+      <div class="content-header">
+        <div>
+          <h2 class="content-title">Assessments</h2>
+        </div>
+        <button class="btn-add" (click)="openAddDialog()">
+          <ng-icon name="reiconAdd" size="16" />
+          Add Assessment
+        </button>
+      </div>
+
+      @if (assessments().length) {
+        <div class="card-list">
+          @for (assessment of assessments(); track assessment.id) {
+            <div class="assessment-card">
+              <div class="assessment-info">
+                <h4 class="assessment-name">{{ assessment.name }}</h4>
+                <p class="assessment-desc">
+                  {{ assessment.description || 'No description provided.' }}
+                </p>
+              </div>
+              <div class="assessment-actions">
+                <button class="action-btn" title="Edit" (click)="openEditDialog(assessment)">
+                  <ng-icon name="reiconEdit2" size="16" />
+                </button>
+                <button
+                  class="action-btn action-btn--danger"
+                  title="Delete"
+                  (click)="deleteAssessment(assessment.id)"
+                >
+                  <ng-icon name="reiconCloseCircle" size="16" />
+                </button>
+              </div>
+            </div>
+          }
+        </div>
+      } @else {
+        <div class="empty-state">
+          <div class="empty-state-icon">
+            <ng-icon name="reiconSearchNormal2" size="40" />
+          </div>
+          <h3 class="empty-state-title">No assessments yet</h3>
+          <p class="empty-state-text">
+            Click "Add Assessment" to create your first assessment configuration.
+          </p>
+        </div>
+      }
+    }
+
+    @if (activeSidebarItem() === 'cefr') {
+      <div class="content-header">
+        <div>
+          <h2 class="content-title">CEFR Mapping</h2>
+        </div>
+        <div class="header-actions">
+          <button class="btn-secondary" (click)="resetMapping()">
+            <ng-icon name="reiconArrowsRotate" size="16" />
+            Reset to Default
+          </button>
+          <button class="btn-add" [disabled]="!canSaveMapping()" (click)="saveMapping()">
+            Save Changes
+          </button>
+        </div>
+      </div>
+
+      <div class="mapping-card">
+        <div class="mapping-grid mapping-grid--head">
+          <span class="mapping-label">Level</span>
+          <span class="mapping-label">Min Score</span>
+          <span class="mapping-label">Max Score</span>
+          <span class="mapping-label">Badge</span>
+          <span></span>
+        </div>
+
+        @for (band of mappingDraft(); track $index) {
+          @let rowIndex = $index;
+          <div class="mapping-grid mapping-row">
+            <input
+              type="text"
+              class="field-input mapping-input mapping-input--level"
+              placeholder="e.g. B1+"
+              [value]="band.level"
+              [attr.aria-label]="'Level name for row ' + (rowIndex + 1)"
+              (input)="onLevelInput(rowIndex, $event)"
+            />
+            <input
+              type="number"
+              class="field-input mapping-input"
+              inputmode="numeric"
+              min="0"
+              [max]="maxScore"
+              placeholder="Min"
+              [value]="band.min"
+              [attr.aria-label]="'Minimum score for ' + band.level"
+              (input)="onMinInput(rowIndex, $event)"
+            />
+            <input
+              type="number"
+              class="field-input mapping-input"
+              inputmode="numeric"
+              min="0"
+              [max]="maxScore"
+              placeholder="Max"
+              [value]="band.max"
+              [attr.aria-label]="'Maximum score for ' + band.level"
+              (input)="onMaxInput(rowIndex, $event)"
+            />
+            <button
+              type="button"
+              class="color-trigger"
+              [style.background]="colorOf(band.color).accent"
+              [attr.aria-label]="'Badge colour for ' + (band.level || 'this level')"
+              [attr.aria-expanded]="openPalette() === rowIndex"
+              (click)="togglePalette(rowIndex)"
+            ></button>
+            <button
+              class="action-btn action-btn--danger"
+              title="Remove level"
+              [attr.aria-label]="'Remove ' + band.level"
+              (click)="removeBand(rowIndex)"
+            >
+              <ng-icon name="reiconCloseCircle" size="16" />
+            </button>
+            @if (openPalette() === rowIndex) {
+              <div
+                class="color-palette"
+                role="group"
+                [attr.aria-label]="'Badge colours for ' + (band.level || 'this level')"
+              >
+                @for (color of colors; track color.id) {
+                  <button
+                    type="button"
+                    class="color-swatch"
+                    [class.is-selected]="color.id === band.color"
+                    [style.background]="color.accent"
+                    [attr.aria-label]="color.label"
+                    [attr.aria-pressed]="color.id === band.color"
+                    [title]="color.label"
+                    (click)="chooseColor(rowIndex, color.id)"
+                  ></button>
+                }
+              </div>
+            }
+            @if (bandError(band, rowIndex); as error) {
+              <p class="mapping-error">{{ error }}</p>
+            }
+          </div>
+        }
+
+        <button class="btn-add-band" (click)="addBand()">
+          <ng-icon name="reiconAdd" size="16" />
+          Add Level
+        </button>
+      </div>
+    }
+  </main>
+</div>
+
+<!-- ── Add / Edit Dialog ──────────────────────────────────── -->
+@if (isDialogOpen()) {
+  <div class="dialog-backdrop" (click)="closeDialog()">
+    <div class="dialog-panel" (click)="$event.stopPropagation()">
+      <div class="dialog-header">
+        <h3 class="dialog-title">
+          {{ editingAssessment() ? 'Edit Assessment' : 'Add Assessment' }}
+        </h3>
+        <button class="dialog-close" (click)="closeDialog()">
+          <ng-icon name="reiconCloseCircle" size="20" />
+        </button>
+      </div>
+
+      <div class="dialog-body">
+        <label class="field">
+          <span class="field-label">Assessment Name</span>
+          <input
+            type="text"
+            class="field-input"
+            placeholder="e.g. Pre Assessment"
+            [value]="formName()"
+            (input)="onFormNameInput($event)"
+          />
+        </label>
+
+        <label class="field">
+          <span class="field-label">Description</span>
+          <textarea
+            class="field-textarea"
+            rows="3"
+            placeholder="Brief description of the assessment…"
+            [value]="formDescription()"
+            (input)="onFormDescriptionInput($event)"
+          ></textarea>
+        </label>
+      </div>
+
+      <div class="dialog-footer">
+        <button class="btn-cancel" (click)="closeDialog()">Cancel</button>
+        <button class="btn-save" [disabled]="!formName().trim()" (click)="saveAssessment()">
+          {{ editingAssessment() ? 'Save Changes' : 'Add Assessment' }}
+        </button>
+      </div>
+    </div>
+  </div>
+}

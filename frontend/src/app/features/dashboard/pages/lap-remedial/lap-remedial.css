@@ -1,0 +1,126 @@
+/* ============================================================
+   LAP / Remedial — page shell (mirrors the assessment-results
+   section), the track tabs, and the results / empty states
+   ============================================================ */
+
+.page-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+  margin: 0;
+  line-height: 1.2;
+}
+
+/* ── Track tabs ────────────────────────────────────────────── */
+
+/* A soft segmented control: the active track sits on a primary tint. */
+.track-tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-self: flex-start;
+  padding: 0.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-card);
+}
+
+.track-tab {
+  padding: 0.4375rem 0.875rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.track-tab:hover {
+  color: var(--color-primary);
+}
+
+.track-tab.is-active {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.track-tab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* ── Results / empty states (as the Assessments section) ────── */
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.results-notice {
+  align-self: flex-end;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #a16207;
+  background: #fef9c3;
+  border-radius: var(--radius-full);
+  padding: 0.25rem 0.75rem;
+  margin: 0;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+  background: #ffffff;
+  border-radius: var(--radius-xl);
+  border: 1px dashed var(--color-border);
+}
+
+.empty-state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: var(--radius-full);
+  background: #f1f5f9; /* Light slate for soft background */
+  color: var(--color-primary);
+  margin-bottom: 1.5rem;
+}
+
+.empty-state-title {
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+  margin: 0 0 0.5rem 0;
+}
+
+.empty-state-text {
+  font-size: 0.875rem;
+  color: var(--color-muted-foreground);
+  margin: 0;
+  max-width: 26rem;
+  line-height: 1.5;
+}

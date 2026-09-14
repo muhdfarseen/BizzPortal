@@ -1,0 +1,190 @@
+<div class="modal-backdrop" (click)="onCancel()">
+  <div
+    class="modal-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="user-dialog-title"
+    (click)="$event.stopPropagation()"
+  >
+    <header class="modal-header">
+      <div class="modal-title-area">
+        <span class="modal-icon-badge" aria-hidden="true">
+          <ng-icon name="reiconUserEdit" size="20" />
+        </span>
+        <div>
+          <h2 id="user-dialog-title" class="modal-title">
+            {{ isEditing() ? 'Edit user' : 'Add user' }}
+          </h2>
+        </div>
+      </div>
+
+      <button type="button" class="modal-close-btn" aria-label="Close dialog" (click)="onCancel()">
+        <ng-icon name="reiconCloseCircle" size="20" />
+      </button>
+    </header>
+
+    <div class="modal-body">
+      <!-- ── Identity ───────────────────────────────────────── -->
+      <section class="form-section">
+        <div class="field-grid">
+          <label class="field">
+            <span class="field-label">Employee ID</span>
+            <input
+              class="text-input"
+              type="text"
+              placeholder="EMP-10294"
+              [value]="draft().employeeId"
+              [disabled]="isEditing()"
+              [attr.aria-invalid]="employeeIdError() ? 'true' : null"
+              (input)="onEmployeeIdInput($event)"
+            />
+            @if (employeeIdError(); as error) {
+              <span class="field-error">{{ error }}</span>
+            } @else if (isEditing()) {
+              <span class="field-hint"
+                >The employee ID identifies the account and cannot change.</span
+              >
+            }
+          </label>
+
+          <div class="field">
+            <span class="field-label">Status</span>
+            <app-select
+              [options]="statusOptions"
+              [value]="draft().status"
+              ariaLabel="Status"
+              (valueChange)="onStatusChange($event)"
+            />
+          </div>
+
+          <label class="field">
+            <span class="field-label">Name</span>
+            <input
+              class="text-input"
+              type="text"
+              placeholder="Alex Morgan"
+              [value]="draft().name"
+              [attr.aria-invalid]="nameError() ? 'true' : null"
+              (input)="onNameInput($event)"
+            />
+            @if (nameError(); as error) {
+              <span class="field-error">{{ error }}</span>
+            }
+          </label>
+
+          <label class="field">
+            <span class="field-label">Email</span>
+            <input
+              class="text-input"
+              type="email"
+              placeholder="alex.morgan@tcs.com"
+              [value]="draft().email"
+              [attr.aria-invalid]="emailError() ? 'true' : null"
+              (input)="onEmailInput($event)"
+            />
+            @if (emailError(); as error) {
+              <span class="field-error">{{ error }}</span>
+            }
+          </label>
+        </div>
+      </section>
+
+      <!-- ── Role ───────────────────────────────────────────── -->
+      <section class="form-section">
+        <h3 class="section-title">Role</h3>
+
+        <div class="field">
+          <app-select
+            [options]="roleOptions()"
+            [value]="draft().role"
+            [disabled]="lockRole()"
+            ariaLabel="Role"
+            (valueChange)="onRoleChange($event)"
+          />
+          @if (lockRole()) {
+            <span class="field-hint">You cannot change the role of your own account.</span>
+          } @else {
+            <span class="field-hint">{{ role().description }}</span>
+          }
+        </div>
+      </section>
+
+      <!-- ── Assigned locations ─────────────────────────────── -->
+      @if (showLocations()) {
+        <section class="form-section">
+          <h3 class="section-title">Assigned locations</h3>
+          <div class="checkbox-grid" role="group" aria-label="Assigned locations">
+            @for (location of locations(); track location.id) {
+              <label class="checkbox-item" [class.is-checked]="isLocationSelected(location.id)">
+                <input
+                  type="checkbox"
+                  [checked]="isLocationSelected(location.id)"
+                  (change)="toggleLocation(location.id)"
+                />
+                <span>{{ location.name }}</span>
+              </label>
+            }
+          </div>
+          @if (locationError(); as error) {
+            <span class="field-error">{{ error }}</span>
+          }
+        </section>
+      }
+
+      <!-- ── Assigned batches ───────────────────────────────── -->
+      @if (showBatches()) {
+        <section class="form-section">
+          <h3 class="section-title">Assigned batches</h3>
+          @if (batchChoices().length) {
+            <div class="checkbox-grid" role="group" aria-label="Assigned batches">
+              @for (batch of batchChoices(); track batch.id) {
+                <label class="checkbox-item" [class.is-checked]="isBatchSelected(batch.id)">
+                  <input
+                    type="checkbox"
+                    [checked]="isBatchSelected(batch.id)"
+                    (change)="toggleBatch(batch.id)"
+                  />
+                  <span>{{ batch.label }}</span>
+                </label>
+              }
+            </div>
+          } @else {
+            <p class="section-empty">Select a location to choose its batches.</p>
+          }
+          @if (batchError(); as error) {
+            <span class="field-error">{{ error }}</span>
+          }
+        </section>
+      }
+
+      <!-- ── Permissions (read-only: they come with the role) ── -->
+      <section class="form-section">
+        <h3 class="section-title">Permissions</h3>
+        <p class="section-note">
+          Permissions come with the role — pick a different role to change them.
+        </p>
+        <ul class="permission-list">
+          @for (permission of permissionRows(); track permission.id) {
+            <li class="permission-row" [class.is-granted]="permission.granted">
+              <span class="permission-mark" aria-hidden="true">
+                <ng-icon [name]="permission.granted ? 'reiconCheck' : 'reiconMinus'" size="14" />
+              </span>
+              <span class="permission-text">
+                <span class="permission-label">{{ permission.label }}</span>
+                <span class="permission-desc">{{ permission.description }}</span>
+              </span>
+              <span class="sr-only">{{ permission.granted ? 'Granted' : 'Not granted' }}</span>
+            </li>
+          }
+        </ul>
+      </section>
+    </div>
+
+    <footer class="modal-footer">
+      <button type="button" class="btn-secondary" (click)="onCancel()">Cancel</button>
+      <button type="button" class="btn-primary" [disabled]="!canSave()" (click)="onSave()">
+        {{ isEditing() ? 'Save changes' : 'Add user' }}
+      </button>
+    </footer>
+  </div>
+</div>
