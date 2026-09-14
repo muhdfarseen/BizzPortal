@@ -10,45 +10,47 @@
   </div>
 
   @if (hasSearched()) {
-    @if (rows().length) {
-      <div class="track-tabs" role="tablist" aria-label="LAP / Remedial tracks">
-        @for (tab of trackTabs; track tab.status) {
-          <button
-            type="button"
-            role="tab"
-            class="track-tab"
-            [class.is-active]="activeTab() === tab.status"
-            [attr.aria-selected]="activeTab() === tab.status ? 'true' : 'false'"
-            (click)="selectTab(tab.status)"
-          >
-            {{ tab.label }}
-          </button>
-        }
-      </div>
-
-      @if (visibleRows().length) {
-        <section class="results" aria-label="LAP / Remedial trainees">
-          @if (isStale()) {
-            <p class="results-notice" role="status">Filters changed — search again to refresh.</p>
-          }
-
-          <app-assessment-table
-            [data]="visibleRows()"
-            [exams]="selectedExams()"
-            [actions]="rowActions()"
-            [showStartDate]="showsTrackColumns()"
-            [showRemark]="showsTrackColumns()"
-            (action)="onAction($event)"
-          />
-        </section>
-      } @else {
-        <div class="empty-state">
-          <p>{{ emptyTabHint() }}</p>
-        </div>
+    <div class="track-tabs" role="tablist" aria-label="LAP / Remedial tracks">
+      @for (tab of trackTabs; track tab.status) {
+        <button
+          type="button"
+          role="tab"
+          class="track-tab"
+          [class.is-active]="activeTab() === tab.status"
+          [attr.aria-selected]="activeTab() === tab.status ? 'true' : 'false'"
+          (click)="selectTab(tab.status)"
+        >
+          {{ tab.label }}
+        </button>
       }
+    </div>
+
+    @if (showTable()) {
+      <section class="results" aria-label="LAP / Remedial trainees">
+        @if (isStale()) {
+          <p class="results-notice" role="status">Filters changed — search again to refresh.</p>
+        }
+
+        <app-assessment-table
+          [data]="rows()"
+          [exams]="selectedExams()"
+          [actions]="rowActions()"
+          [showStartDate]="showsTrackColumns()"
+          [showRemark]="showsTrackColumns()"
+          [pageIndex]="pageIndex()"
+          [pageSize]="pageSize()"
+          [totalElements]="totalElements()"
+          [loading]="loading()"
+          [searchQuery]="search()"
+          (action)="onAction($event)"
+          (pageChange)="onPageChange($event)"
+          (searchChange)="onSearchChange($event)"
+          (sortChange)="onSortChange($event)"
+        />
+      </section>
     } @else {
       <div class="empty-state">
-        <p>No trainees found for the selected location, batch and LG.</p>
+        <p>{{ emptyTabHint() }}</p>
       </div>
     }
   } @else {

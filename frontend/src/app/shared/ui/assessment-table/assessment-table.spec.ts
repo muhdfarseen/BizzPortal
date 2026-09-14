@@ -1,8 +1,9 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { Component, signal } from '@angular/core';
+import { Component, computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { vi } from 'vitest';
 import {
   AssessmentExam,
   CefrLevel,
@@ -10,11 +11,14 @@ import {
   cefrBadge,
   cefrColor,
 } from '../../../core/models/assessment.model';
+import { SortDirection } from '../../../core/models/page.model';
 import { CefrMappingService } from '../../../core/services/cefr-mapping.service';
 import { flushStartup } from '../../../testing/api-testing';
 import {
+  AssessmentPageChange,
   AssessmentRowAction,
   AssessmentRowActionEvent,
+  AssessmentSortChange,
   AssessmentTableComponent,
 } from './assessment-table';
 
@@ -79,26 +83,107 @@ const TRACK_ACTIONS: readonly AssessmentRowAction[] = [
   { id: 'close-lap', label: 'Close LAP', variant: 'secondary' },
 ];
 
+/**
+ * Host that stands in for a server-paged page: it holds the whole set, applies
+ * the search and order the table reports, and hands back the requested page.
+ * The table itself must never slice, filter or sort.
+ */
 @Component({
   imports: [AssessmentTableComponent],
   template: `
     <app-assessment-table
-      [data]="data()"
+      [data]="pageRows()"
       [exams]="exams()"
       [actions]="actions()"
       [showStartDate]="showStartDate()"
       [showRemark]="showRemark()"
+      [pageIndex]="pageIndex()"
+      [pageSize]="pageSize()"
+      [totalElements]="totalElements()"
+      [loading]="loading()"
+      [searchQuery]="searchQuery()"
+      [sortableColumns]="sortable()"
       (action)="triggered.push($event)"
+      (pageChange)="onPageChange($event)"
+      (searchChange)="onSearchChange($event)"
+      (sortChange)="onSortChange($event)"
     />
   `,
 })
 class TestHostComponent {
-  readonly data = signal<readonly TraineeAssessment[]>(ROWS);
+  readonly dataset = signal<readonly TraineeAssessment[]>(ROWS);
   readonly exams = signal<readonly AssessmentExam[]>(EXAMS);
   readonly actions = signal<readonly AssessmentRowAction[]>([EDIT_ACTION]);
   readonly showStartDate = signal(false);
   readonly showRemark = signal(false);
+  readonly loading = signal(false);
+
+  /** Overrides the total the page reports, to prove it never comes from the rows. */
+  readonly reportedTotal = signal<number | null>(null);
+
+  readonly pageIndex = signal(0);
+  readonly pageSize = signal(10);
+  readonly searchQuery = signal('');
+
+  /** Which columns the server can order by; the default of the real component. */
+  readonly sortable = signal<readonly string[]>(['employeeId', 'name']);
+  readonly sort = signal<AssessmentSortChange | null>(null);
+
+  /** What the table asked for, so a spec can assert on the events themselves. */
+  readonly pageRequests: AssessmentPageChange[] = [];
+  readonly searchRequests: string[] = [];
+  readonly sortRequests: AssessmentSortChange[] = [];
   readonly triggered: AssessmentRowActionEvent[] = [];
+
+  /** The rows a server would return for the applied search and order. */
+  private readonly matching = computed<readonly TraineeAssessment[]>(() => {
+    const term = this.searchQuery().trim().toLowerCase();
+    const order = this.sort();
+    const rows = this.dataset().filter(
+      (row) =>
+        term === '' ||
+        row.name.toLowerCase().includes(term) ||
+        row.employeeId.toLowerCase().includes(term),
+    );
+    if (!order) {
+      return rows;
+    }
+    const factor = order.direction === 'desc' ? -1 : 1;
+    return [...rows].sort(
+      (first, second) =>
+        factor *
+        String(first[order.sort as 'name' | 'employeeId']).localeCompare(
+          String(second[order.sort as 'name' | 'employeeId']),
+        ),
+    );
+  });
+
+  readonly totalElements = computed(() => this.reportedTotal() ?? this.matching().length);
+
+  readonly pageRows = computed(() =>
+    this.matching().slice(
+      this.pageIndex() * this.pageSize(),
+      this.pageIndex() * this.pageSize() + this.pageSize(),
+    ),
+  );
+
+  onPageChange(change: AssessmentPageChange): void {
+    this.pageRequests.push(change);
+    this.pageIndex.set(change.pageIndex);
+    this.pageSize.set(change.pageSize);
+  }
+
+  onSearchChange(term: string): void {
+    this.searchRequests.push(term);
+    this.searchQuery.set(term);
+    this.pageIndex.set(0);
+  }
+
+  onSortChange(change: AssessmentSortChange): void {
+    this.sortRequests.push(change);
+    this.sort.set(change);
+    this.pageIndex.set(0);
+  }
 }
 
 /** The dropdown is attached on a macrotask, so let it settle. */
@@ -118,7 +203,10 @@ describe('AssessmentTableComponent', () => {
     http = TestBed.inject(HttpTestingController);
   });
 
-  afterEach(() => http.verify());
+  afterEach(() => {
+    vi.useRealTimers();
+    http.verify();
+  });
 
   function createFixture() {
     const fixture = TestBed.createComponent(TestHostComponent);
@@ -205,7 +293,7 @@ describe('AssessmentTableComponent', () => {
     ]);
   });
 
-  it('renders the requested page of rows with the score of every exam', () => {
+  it('renders exactly the page the server sent, with the score of every exam', () => {
     const fixture = createFixture();
     const rows = bodyRows(fixture);
 
@@ -255,7 +343,7 @@ describe('AssessmentTableComponent', () => {
 
   it('shows a placeholder for an exam the trainee has not taken', () => {
     const fixture = createFixture();
-    fixture.componentInstance.data.set(ROWS_WITH_PENDING);
+    fixture.componentInstance.dataset.set(ROWS_WITH_PENDING);
     fixture.detectChanges();
     fixture.detectChanges();
 
@@ -265,51 +353,187 @@ describe('AssessmentTableComponent', () => {
     expect(pending[0].closest('.td-result')?.getAttribute('title')).toBe('Mid not taken yet');
   });
 
-  it('summarises the visible slice of the result set', () => {
-    expect(summary(createFixture())).toBe('Showing 1–10 of 24 trainees');
+  it('summarises the page from the server total, never from the rows on screen', () => {
+    const fixture = createFixture();
+    // Ten rows on screen, but the server says twenty-four matched.
+    fixture.componentInstance.dataset.set(ROWS.slice(0, 10));
+    fixture.componentInstance.reportedTotal.set(24);
+    fixture.detectChanges();
+    fixture.detectChanges();
+
+    expect(bodyRows(fixture).length).toBe(10);
+    expect(summary(fixture)).toBe('Showing 1–10 of 24 trainees');
   });
 
-  it('finds a trainee by name, ignoring case', () => {
+  it('reports what was typed once typing settles, not once per keystroke', () => {
+    vi.useFakeTimers();
     const fixture = createFixture();
-    typeSearch(fixture, 'trainee 7');
+
+    typeSearch(fixture, 'trainee');
+    typeSearch(fixture, 'trainee 1');
+    typeSearch(fixture, 'trainee 12');
+
+    // Nothing is sent while the user is still typing…
+    expect(fixture.componentInstance.searchRequests).toEqual([]);
+
+    vi.advanceTimersByTime(300);
+    fixture.detectChanges();
+
+    // …then one request carries the finished term.
+    expect(fixture.componentInstance.searchRequests).toEqual(['trainee 12']);
+    expect(searchInput(fixture).value).toBe('trainee 12');
+  });
+
+  it('shows the server page of a search and keeps the box as typed', () => {
+    vi.useFakeTimers();
+    const fixture = createFixture();
+
+    typeSearch(fixture, 'Trainee 7');
+    vi.advanceTimersByTime(300);
+    fixture.detectChanges();
 
     expect(namesShown(fixture)).toEqual(['Trainee 7']);
     expect(summary(fixture)).toBe('Showing 1–1 of 1 trainees');
+    expect(searchInput(fixture).value).toBe('Trainee 7');
   });
 
-  it('finds a trainee by employee id just as readily', () => {
+  it('asks the server for the next page rather than slicing the loaded rows', () => {
     const fixture = createFixture();
-    typeSearch(fixture, '1007');
 
-    expect(bodyRows(fixture)).toHaveLength(1);
-    expect(bodyRows(fixture)[0].querySelector('.td-empid')?.textContent?.trim()).toBe('EMP-1007');
-  });
+    expect(
+      host(fixture).querySelector<HTMLButtonElement>('[aria-label="Previous page"]')?.disabled,
+    ).toBe(true);
 
-  it('matches a partial term anywhere in the field, paginating the result', () => {
-    const fixture = createFixture();
-    // Matches Trainee 1 and Trainee 10–19: eleven rows, so still two pages.
-    typeSearch(fixture, 'Trainee 1');
+    clickLabel(fixture, 'Next page');
 
-    expect(summary(fixture)).toBe('Showing 1–10 of 11 trainees');
-    expect(namesShown(fixture)[0]).toBe('Trainee 1');
-  });
-
-  it('returns to the first page so a narrow result is never shown as empty', () => {
-    const fixture = createFixture();
+    expect(fixture.componentInstance.pageRequests).toEqual([{ pageIndex: 1, pageSize: 10 }]);
+    expect(summary(fixture)).toBe('Showing 11–20 of 24 trainees');
+    expect(firstCellText(fixture)).toBe('EMP-1011');
 
     clickLabel(fixture, 'Last page');
-    expect(bodyRows(fixture)).toHaveLength(4);
+    expect(fixture.componentInstance.pageRequests.at(-1)).toEqual({
+      pageIndex: 2,
+      pageSize: 10,
+    });
+    expect(summary(fixture)).toBe('Showing 21–24 of 24 trainees');
+    expect(
+      host(fixture).querySelector<HTMLButtonElement>('[aria-label="Next page"]')?.disabled,
+    ).toBe(true);
 
-    typeSearch(fixture, 'Trainee 24');
+    clickLabel(fixture, 'First page');
+    expect(summary(fixture)).toBe('Showing 1–10 of 24 trainees');
+  });
 
-    // Staying on page 3 of a result that now has one page would render an empty
-    // grid and read as "not found".
-    expect(namesShown(fixture)).toEqual(['Trainee 24']);
+  it('jumps to a page from its number, windowing the numbers with gaps', () => {
+    const fixture = createFixture();
+    fixture.componentInstance.dataset.set(
+      Array.from({ length: 100 }, (_, position) => trainee(position + 1, { pre: 40 })),
+    );
+    fixture.componentInstance.pageIndex.set(4);
+    fixture.detectChanges();
+    fixture.detectChanges();
+
+    // Page 5 of 10 shows itself and its neighbours, with the ends in reach.
+    const labels = Array.from(host(fixture).querySelectorAll('.pagination-page')).map((button) =>
+      button.textContent?.trim(),
+    );
+    expect(labels).toEqual(['1', '4', '5', '6', '10']);
+    expect(host(fixture).querySelectorAll('.pagination-gap').length).toBe(2);
+
+    clickLabel(fixture, 'Page 10');
+
+    expect(fixture.componentInstance.pageRequests.at(-1)).toEqual({
+      pageIndex: 9,
+      pageSize: 10,
+    });
+    expect(firstCellText(fixture)).toBe('EMP-1091');
+  });
+
+  it('resizes the page from the rows-per-page select and returns to the first page', async () => {
+    const fixture = createFixture();
+    clickLabel(fixture, 'Next page');
+    expect(summary(fixture)).toBe('Showing 11–20 of 24 trainees');
+
+    host(fixture).querySelector<HTMLElement>('.page-size')?.click();
+    await flushOverlay();
+    fixture.detectChanges();
+
+    const option = Array.from(document.querySelectorAll<HTMLElement>('[ngpSelectOption]')).find(
+      (candidate) => candidate.textContent?.trim() === '25 / page',
+    );
+    option?.click();
+    await flushOverlay();
+    fixture.detectChanges();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.pageRequests.at(-1)).toEqual({
+      pageIndex: 0,
+      pageSize: 25,
+    });
+    expect(bodyRows(fixture).length).toBe(24);
+    expect(summary(fixture)).toBe('Showing 1–24 of 24 trainees');
+  });
+
+  it('reports the order a header asks for instead of sorting the page itself', () => {
+    const fixture = createFixture();
+    // Deliberately in the wrong order, so only the server's answer can reorder it.
+    fixture.componentInstance.dataset.set([...ROWS].reverse());
+    fixture.detectChanges();
+    fixture.detectChanges();
+
+    sortButton(fixture, 'Emp ID').click();
+    fixture.detectChanges();
+
+    const requested: AssessmentSortChange = { sort: 'employeeId', direction: 'asc' };
+    expect(fixture.componentInstance.sortRequests).toEqual([requested]);
+    expect(
+      host(fixture).querySelector('th[data-column="employeeId"]')?.getAttribute('aria-sort'),
+    ).toBe('ascending');
+    expect(firstCellText(fixture)).toBe('EMP-1001');
+
+    sortButton(fixture, 'Emp ID').click();
+    fixture.detectChanges();
+
+    const descending: SortDirection = 'desc';
+    expect(fixture.componentInstance.sortRequests.at(-1)).toEqual({
+      sort: 'employeeId',
+      direction: descending,
+    });
+    expect(firstCellText(fixture)).toBe('EMP-1024');
+  });
+
+  it('offers no sort control on an exam column, which the server cannot order by', () => {
+    const fixture = createFixture();
+
+    // The exam columns are still there...
+    expect(headerLabels(fixture)).toContain('Pre');
+    // ...but they do not pretend to be sortable. A control whose click is ignored
+    // is worse than no control: the arrow moves and the order does not.
+    expect(host(fixture).querySelector('th[data-column="pre"] .th-sort')).toBeNull();
+    expect(host(fixture).querySelector('th[data-column="mid"] .th-sort')).toBeNull();
+  });
+
+  it('offers sorting only on the columns the host declares', () => {
+    const fixture = TestBed.createComponent(TestHostComponent);
+    fixture.componentInstance.sortable.set(['name']);
+    fixture.detectChanges();
+    flushStartup(http);
+    fixture.detectChanges();
+
+    expect(host(fixture).querySelector('th[data-column="name"] .th-sort')).not.toBeNull();
+    expect(host(fixture).querySelector('th[data-column="employeeId"] .th-sort')).toBeNull();
+  });
+
+  it('does not offer sorting on the action column', () => {
+    expect(host(createFixture()).querySelector('th[data-column="actions"] .th-sort')).toBeNull();
   });
 
   it('says a search found nobody, and offers a way back', () => {
+    vi.useFakeTimers();
     const fixture = createFixture();
     typeSearch(fixture, 'nobody by this name');
+    vi.advanceTimersByTime(300);
+    fixture.detectChanges();
 
     expect(summary(fixture)).toBe('No trainees');
     expect(host(fixture).querySelector('.td-empty')?.textContent).toContain(
@@ -319,15 +543,20 @@ describe('AssessmentTableComponent', () => {
     host(fixture).querySelector<HTMLButtonElement>('.td-empty-clear')?.click();
     fixture.detectChanges();
 
-    expect(bodyRows(fixture)).toHaveLength(10);
+    expect(fixture.componentInstance.searchRequests.at(-1)).toBe('');
     expect(searchInput(fixture).value).toBe('');
+    expect(bodyRows(fixture)).toHaveLength(10);
   });
 
-  it('shows the clear button only while a search is active', () => {
+  it('shows the clear button only while a search is applied', () => {
+    vi.useFakeTimers();
     const fixture = createFixture();
     expect(host(fixture).querySelector('.table-search-clear')).toBeNull();
 
     typeSearch(fixture, 'Trainee 7');
+    vi.advanceTimersByTime(300);
+    fixture.detectChanges();
+
     const clear = host(fixture).querySelector<HTMLButtonElement>('.table-search-clear');
     expect(clear).not.toBeNull();
 
@@ -336,12 +565,15 @@ describe('AssessmentTableComponent', () => {
 
     expect(searchInput(fixture).value).toBe('');
     expect(host(fixture).querySelector('.table-search-clear')).toBeNull();
-    expect(bodyRows(fixture)).toHaveLength(10);
+    expect(fixture.componentInstance.searchRequests.at(-1)).toBe('');
   });
 
   it('treats a whitespace-only term as no search at all', () => {
+    vi.useFakeTimers();
     const fixture = createFixture();
     typeSearch(fixture, '   ');
+    vi.advanceTimersByTime(300);
+    fixture.detectChanges();
 
     expect(bodyRows(fixture)).toHaveLength(10);
     expect(host(fixture).querySelector('.table-search-clear')).toBeNull();
@@ -349,7 +581,7 @@ describe('AssessmentTableComponent', () => {
 
   it('keeps the empty-selection wording when there was no search', () => {
     const fixture = createFixture();
-    fixture.componentInstance.data.set([]);
+    fixture.componentInstance.dataset.set([]);
     fixture.detectChanges();
 
     expect(host(fixture).querySelector('.td-empty')?.textContent).toContain(
@@ -357,19 +589,6 @@ describe('AssessmentTableComponent', () => {
     );
     // Nothing was searched for, so there is nothing to clear.
     expect(host(fixture).querySelector('.td-empty-clear')).toBeNull();
-  });
-
-  it('searches the newly selected group, not the one before it', () => {
-    const fixture = createFixture();
-    typeSearch(fixture, 'Trainee 7');
-    expect(namesShown(fixture)).toEqual(['Trainee 7']);
-
-    // A new selection arrives with the search still applied to it.
-    fixture.componentInstance.data.set(ROWS_WITH_PENDING);
-    fixture.detectChanges();
-
-    expect(namesShown(fixture)).toEqual([]);
-    expect(host(fixture).querySelector('.td-empty')?.textContent).toContain('No trainees match');
   });
 
   it('keeps the summary on the left and the rows-per-page control beside the page controls', () => {
@@ -397,87 +616,20 @@ describe('AssessmentTableComponent', () => {
     expect(controls[1]?.querySelector('.page-size')).toBeNull();
   });
 
-  it('pages through the result set with the pagination controls', () => {
+  it('marks itself busy and holds the pager while a page is in flight', () => {
     const fixture = createFixture();
-
-    expect(
-      host(fixture).querySelector<HTMLButtonElement>('[aria-label="Previous page"]')?.disabled,
-    ).toBe(true);
-
-    host(fixture).querySelector<HTMLButtonElement>('[aria-label="Next page"]')?.click();
+    fixture.componentInstance.loading.set(true);
     fixture.detectChanges();
 
-    expect(summary(fixture)).toBe('Showing 11–20 of 24 trainees');
-    expect(firstCellText(fixture)).toBe('EMP-1011');
-
-    host(fixture).querySelector<HTMLButtonElement>('[aria-label="Last page"]')?.click();
-    fixture.detectChanges();
-
-    expect(summary(fixture)).toBe('Showing 21–24 of 24 trainees');
+    const card = host(fixture).querySelector('.table-card');
+    expect(card?.getAttribute('aria-busy')).toBe('true');
     expect(
       host(fixture).querySelector<HTMLButtonElement>('[aria-label="Next page"]')?.disabled,
     ).toBe(true);
 
-    host(fixture).querySelector<HTMLButtonElement>('[aria-label="First page"]')?.click();
+    fixture.componentInstance.loading.set(false);
     fixture.detectChanges();
-
-    expect(summary(fixture)).toBe('Showing 1–10 of 24 trainees');
-  });
-
-  it('jumps to a page from its number', () => {
-    const fixture = createFixture();
-
-    host(fixture).querySelector<HTMLButtonElement>('[aria-label="Page 3"]')?.click();
-    fixture.detectChanges();
-
-    expect(firstCellText(fixture)).toBe('EMP-1021');
-    expect(host(fixture).querySelector('[aria-label="Page 3"]')?.getAttribute('aria-current')).toBe(
-      'page',
-    );
-  });
-
-  it('resizes the page from the rows-per-page select', async () => {
-    const fixture = createFixture();
-
-    host(fixture).querySelector<HTMLElement>('.page-size')?.click();
-    await flushOverlay();
-    fixture.detectChanges();
-
-    const option = Array.from(document.querySelectorAll<HTMLElement>('[ngpSelectOption]')).find(
-      (candidate) => candidate.textContent?.trim() === '25 / page',
-    );
-    option?.click();
-    await flushOverlay();
-    fixture.detectChanges();
-    fixture.detectChanges();
-
-    expect(bodyRows(fixture).length).toBe(24);
-    expect(summary(fixture)).toBe('Showing 1–24 of 24 trainees');
-  });
-
-  it('sorts by an exam score and back again', () => {
-    const fixture = createFixture();
-
-    // Score columns open on the highest mark (TanStack sorts numbers descending first).
-    sortButton(fixture, 'Pre').click();
-    fixture.detectChanges();
-
-    expect(firstCellText(fixture)).toBe('EMP-1024');
-    expect(host(fixture).querySelector('th[data-column="pre"]')?.getAttribute('aria-sort')).toBe(
-      'descending',
-    );
-
-    sortButton(fixture, 'Pre').click();
-    fixture.detectChanges();
-
-    expect(firstCellText(fixture)).toBe('EMP-1001');
-    expect(host(fixture).querySelector('th[data-column="pre"]')?.getAttribute('aria-sort')).toBe(
-      'ascending',
-    );
-  });
-
-  it('does not offer sorting on the action column', () => {
-    expect(host(createFixture()).querySelector('th[data-column="actions"] .th-sort')).toBeNull();
+    expect(card?.getAttribute('aria-busy')).toBeNull();
   });
 
   it('emits the action and its trainee when the edit action is used', () => {
@@ -497,7 +649,7 @@ describe('AssessmentTableComponent', () => {
 
   it('renders an empty state when the selection has no trainees', () => {
     const fixture = createFixture();
-    fixture.componentInstance.data.set([]);
+    fixture.componentInstance.dataset.set([]);
     fixture.detectChanges();
     fixture.detectChanges();
 
@@ -552,7 +704,7 @@ describe('AssessmentTableComponent', () => {
     expect(host(fixture).querySelector('.td-start-date')).toBeNull();
 
     fixture.componentInstance.showStartDate.set(true);
-    fixture.componentInstance.data.set(ROWS_WITH_REMARKS);
+    fixture.componentInstance.dataset.set(ROWS_WITH_REMARKS);
     fixture.detectChanges();
     fixture.detectChanges();
 
@@ -579,7 +731,7 @@ describe('AssessmentTableComponent', () => {
     expect(host(fixture).querySelector('.td-remark')).toBeNull();
 
     fixture.componentInstance.showRemark.set(true);
-    fixture.componentInstance.data.set(ROWS_WITH_REMARKS);
+    fixture.componentInstance.dataset.set(ROWS_WITH_REMARKS);
     fixture.detectChanges();
     fixture.detectChanges();
 

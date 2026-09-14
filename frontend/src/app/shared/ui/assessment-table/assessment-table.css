@@ -382,3 +382,9 @@
   padding: 0 0.125rem;
   color: #94a3b8;
 }
+
+/* A page in flight still shows the last one, so it is dimmed rather than
+   blanked — the controls are held until the answer arrives. */
+.table-card.is-loading .table-scroll {
+  opacity: 0.6;
+}

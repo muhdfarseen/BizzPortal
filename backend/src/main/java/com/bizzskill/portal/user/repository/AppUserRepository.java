@@ -4,12 +4,15 @@ import com.bizzskill.portal.common.enums.Status;
 import com.bizzskill.portal.user.entity.AppUser;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 /** Read/write access to portal accounts. */
-public interface AppUserRepository extends JpaRepository<AppUser, Long> {
+public interface AppUserRepository
+        extends JpaRepository<AppUser, Long>, JpaSpecificationExecutor<AppUser> {
 
     /**
      * Looks an account up for sign-in.
@@ -25,14 +28,17 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
     Optional<AppUser> findByIntEmployeeId(Long intEmployeeId);
 
     /**
-     * Every account for the user-management screen.
+     * The accounts named, with everything the user-management screen renders.
      *
-     * <p>Role, locations and batches are all fetched up front: the screen renders
-     * every user's role name and assignments, so lazy loading here would be a
-     * textbook N+1.
+     * <p>The second half of a paged read. Assembling a page in one query would mean
+     * joining {@code locationIds} and {@code batchIds}, which are element
+     * collections — and Hibernate cannot apply a row limit across a collection join,
+     * so it silently loads the whole table and pages in memory. Paging the accounts
+     * first and fetching their collections for just that page keeps the limit in the
+     * database, which is the entire point.
      */
     @EntityGraph(attributePaths = {"role", "locationIds", "batchIds"})
-    List<AppUser> findAllByOrderByTxtNameAsc();
+    List<AppUser> findByIntUserIdIn(Collection<Long> intUserIds);
 
     boolean existsByTxtUsernameIgnoreCase(String username);
 

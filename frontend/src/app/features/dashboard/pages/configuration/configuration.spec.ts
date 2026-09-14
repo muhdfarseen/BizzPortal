@@ -2,7 +2,11 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { CEFR_COLORS, DEFAULT_CEFR_MAPPING } from '../../../../core/models/assessment.model';
+import {
+  CEFR_COLORS,
+  CefrScoreBand,
+  DEFAULT_CEFR_MAPPING,
+} from '../../../../core/models/assessment.model';
 import { AuthService } from '../../../../core/services/auth.service';
 import { CefrMappingService } from '../../../../core/services/cefr-mapping.service';
 import { ToastService } from '../../../../core/ui/toast.service';
@@ -57,6 +61,23 @@ describe('ConfigurationComponent', () => {
 
   function host(): HTMLElement {
     return fixture.nativeElement as HTMLElement;
+  }
+
+  /** The confirmation dialog, if one is on screen. */
+  function confirmDialog(): HTMLElement | null {
+    return host().querySelector<HTMLElement>('[role="alertdialog"]');
+  }
+
+  /** Presses the destructive button in the confirmation. */
+  function confirmDelete(): void {
+    confirmDialog()?.querySelector<HTMLButtonElement>('.btn-danger')?.click();
+    fixture.detectChanges();
+  }
+
+  /** Presses Cancel in the confirmation. */
+  function cancelDelete(): void {
+    confirmDialog()?.querySelector<HTMLButtonElement>('.btn-secondary')?.click();
+    fixture.detectChanges();
   }
 
   /** Opens the CEFR Mapping sidebar section. */
@@ -137,6 +158,33 @@ describe('ConfigurationComponent', () => {
     ) as HTMLTextAreaElement;
     descriptionInput.value = description;
     descriptionInput.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+  }
+
+  /** The card showing the named assessment. */
+  function cardFor(name: string): HTMLElement {
+    return Array.from(host().querySelectorAll<HTMLElement>('.assessment-card')).find(
+      (candidate) => candidate.querySelector('.assessment-name')?.textContent?.trim() === name,
+    ) as HTMLElement;
+  }
+
+  /** Opens the edit dialog for the named assessment. */
+  function openEditFor(name: string): void {
+    cardFor(name).querySelector<HTMLButtonElement>('.action-btn[title="Edit"]')?.click();
+    fixture.detectChanges();
+  }
+
+  /** Flicks the edit dialog's status switch. */
+  function setDialogStatus(active: boolean): void {
+    const input = host().querySelector<HTMLInputElement>('.switch-input') as HTMLInputElement;
+    input.checked = active;
+    input.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+  }
+
+  /** Dismisses the open dialog without saving. */
+  function closeDialog(): void {
+    host().querySelector<HTMLButtonElement>('.dialog-footer .btn-cancel')?.click();
     fixture.detectChanges();
   }
 
@@ -227,7 +275,7 @@ describe('ConfigurationComponent', () => {
 
   it('updates an assessment through the API', () => {
     const firstCard = host().querySelectorAll<HTMLElement>('.assessment-card')[0];
-    firstCard.querySelector<HTMLButtonElement>('.action-btn')?.click();
+    firstCard.querySelector<HTMLButtonElement>('.action-btn[title="Edit"]')?.click();
     fixture.detectChanges();
 
     typeAssessmentForm('Pre Assessment Updated', 'Baseline, revised.');
@@ -249,6 +297,9 @@ describe('ConfigurationComponent', () => {
       name: 'Pre Assessment Updated',
       description: 'Baseline, revised.',
       maxScore: 90,
+      // The dialog owns the lifecycle switch, so it states the status outright
+      // rather than leaving the API to infer it.
+      status: 'active',
     });
     request.flush(updated);
 
@@ -262,6 +313,7 @@ describe('ConfigurationComponent', () => {
     const firstCard = host().querySelectorAll<HTMLElement>('.assessment-card')[0];
     firstCard.querySelector<HTMLButtonElement>('.action-btn--danger')?.click();
     fixture.detectChanges();
+    confirmDelete();
 
     http
       .expectOne({ method: 'DELETE', url: `${API_BASE}/configuration/assessments/1` })
@@ -272,6 +324,181 @@ describe('ConfigurationComponent', () => {
     expect(component.assessments().map((assessment) => assessment.id)).toEqual(['2', '3']);
     expect(host().querySelectorAll('.assessment-card').length).toBe(2);
     expect(toastMessages()).toEqual(['Assessment deleted']);
+  });
+
+  it('asks before deleting an assessment, and sends nothing until confirmed', () => {
+    const firstCard = host().querySelectorAll<HTMLElement>('.assessment-card')[0];
+    firstCard.querySelector<HTMLButtonElement>('.action-btn--danger')?.click();
+    fixture.detectChanges();
+
+    expect(confirmDialog()).not.toBeNull();
+    expect(confirmDialog()?.textContent).toContain(component.assessments()[0].name);
+    // The click alone must not reach the API.
+    http.expectNone({ method: 'DELETE', url: `${API_BASE}/configuration/assessments/1` });
+  });
+
+  it('keeps the assessment when the deletion is cancelled', () => {
+    const before = component.assessments().length;
+    const firstCard = host().querySelectorAll<HTMLElement>('.assessment-card')[0];
+    firstCard.querySelector<HTMLButtonElement>('.action-btn--danger')?.click();
+    fixture.detectChanges();
+
+    cancelDelete();
+
+    http.expectNone({ method: 'DELETE', url: `${API_BASE}/configuration/assessments/1` });
+    expect(confirmDialog()).toBeNull();
+    expect(component.assessments().length).toBe(before);
+  });
+
+  it('closes the confirmation on Escape without deleting', () => {
+    const before = component.assessments().length;
+    const firstCard = host().querySelectorAll<HTMLElement>('.assessment-card')[0];
+    firstCard.querySelector<HTMLButtonElement>('.action-btn--danger')?.click();
+    fixture.detectChanges();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+
+    expect(confirmDialog()).toBeNull();
+    expect(component.assessments().length).toBe(before);
+    http.expectNone({ method: 'DELETE', url: `${API_BASE}/configuration/assessments/1` });
+  });
+
+  it('asks before removing a CEFR level, and keeps it when cancelled', () => {
+    openMapping();
+    const initial = rows().length;
+    const level = levelInput(rows()[3]).value;
+
+    rows()[3].querySelector<HTMLButtonElement>('.action-btn--danger')?.click();
+    fixture.detectChanges();
+
+    expect(confirmDialog()).not.toBeNull();
+    expect(confirmDialog()?.textContent).toContain(level);
+    expect(rows().length).toBe(initial);
+
+    cancelDelete();
+
+    expect(confirmDialog()).toBeNull();
+    expect(rows().length).toBe(initial);
+    expect(rows().map((row) => levelInput(row).value)).toContain(level);
+  });
+
+  it('offers exactly one control per action on a card', () => {
+    const controls = Array.from(
+      cardFor('Pre Assessment').querySelectorAll<HTMLButtonElement>(
+        '.assessment-actions .action-btn',
+      ),
+    );
+
+    // Editing and deleting only: the lifecycle toggle lives in the dialog,
+    // where the rest of the assessment's properties are edited.
+    expect(controls.map((control) => control.getAttribute('title'))).toEqual(['Edit', 'Delete']);
+    expect(cardFor('Pre Assessment').querySelectorAll('ng-icon[name="reiconEdit2"]').length).toBe(
+      1,
+    );
+  });
+
+  it('retires an assessment through the edit dialog', () => {
+    openEditFor('Pre Assessment');
+    setDialogStatus(false);
+    saveAssessment();
+
+    const request = http.expectOne({
+      method: 'PUT',
+      url: `${API_BASE}/configuration/assessments/1`,
+    });
+    // The API replaces the record, so the untouched fields go back with it.
+    expect(request.request.body).toEqual({
+      name: 'Pre Assessment',
+      description: 'Baseline.',
+      maxScore: 90,
+      status: 'inactive',
+    });
+
+    const retired: ApiAssessmentFixture[] = [
+      { ...ACTIVE_EXAMS[0], status: 'inactive' },
+      ...ACTIVE_EXAMS.slice(1),
+    ];
+    request.flush(retired[0]);
+    flushRefreshedLists(retired, ACTIVE_EXAMS.slice(1));
+
+    expect(cardFor('Pre Assessment').querySelector('.status-badge')?.textContent).toContain(
+      'Inactive',
+    );
+    expect(component.assessments().find((it) => it.name === 'Pre Assessment')?.status).toBe(
+      'inactive',
+    );
+    expect(toastMessages()).toContain('Assessment updated');
+  });
+
+  it('brings a retired assessment back into use', () => {
+    openEditFor('Pre Assessment');
+    setDialogStatus(false);
+    saveAssessment();
+    const retired: ApiAssessmentFixture[] = [
+      { ...ACTIVE_EXAMS[0], status: 'inactive' },
+      ...ACTIVE_EXAMS.slice(1),
+    ];
+    http
+      .expectOne({ method: 'PUT', url: `${API_BASE}/configuration/assessments/1` })
+      .flush(retired[0]);
+    flushRefreshedLists(retired, ACTIVE_EXAMS.slice(1));
+
+    openEditFor('Pre Assessment');
+    // Opening a retired assessment shows the switch off...
+    expect(host().querySelector<HTMLInputElement>('.switch-input')?.checked).toBe(false);
+
+    // ...and turning it back on sends active.
+    setDialogStatus(true);
+    saveAssessment();
+    const restore = http.expectOne({
+      method: 'PUT',
+      url: `${API_BASE}/configuration/assessments/1`,
+    });
+    expect((restore.request.body as { status?: string }).status).toBe('active');
+    restore.flush(ACTIVE_EXAMS[0]);
+    flushRefreshedLists(ACTIVE_EXAMS);
+
+    expect(cardFor('Pre Assessment').querySelector('.status-badge')).toBeNull();
+  });
+
+  it('labels the status switch, and keeps it out of the create dialog', () => {
+    // A new assessment starts active, so there is nothing to switch.
+    openAddAssessment();
+    expect(host().querySelector('.switch-input')).toBeNull();
+    closeDialog();
+
+    openEditFor('Pre Assessment');
+    const input = host().querySelector<HTMLInputElement>('.switch-input') as HTMLInputElement;
+
+    expect(input).not.toBeNull();
+    // A switch rather than a checkbox: it applies immediately and has on/off
+    // semantics, which is what a screen reader should announce.
+    expect(input.getAttribute('role')).toBe('switch');
+    expect(input.checked).toBe(true);
+    expect(host().querySelector('.switch-state')?.textContent).toContain('Active');
+    expect(host().querySelector('.switch-hint')?.textContent).toContain('Scored in the results');
+  });
+
+  it('badges only the retired assessments', () => {
+    expect(host().querySelectorAll('.status-badge').length).toBe(0);
+
+    openEditFor('Pre Assessment');
+    setDialogStatus(false);
+    saveAssessment();
+    const retired: ApiAssessmentFixture[] = [
+      { ...ACTIVE_EXAMS[0], status: 'inactive' },
+      ...ACTIVE_EXAMS.slice(1),
+    ];
+    http
+      .expectOne({ method: 'PUT', url: `${API_BASE}/configuration/assessments/1` })
+      .flush(retired[0]);
+    flushRefreshedLists(retired, ACTIVE_EXAMS.slice(1));
+
+    // One badge, on the retired card alone.
+    expect(host().querySelectorAll('.status-badge').length).toBe(1);
+    expect(cardFor('Pre Assessment').classList.contains('assessment-card--inactive')).toBe(true);
+    expect(cardFor('Mid Assessment').classList.contains('assessment-card--inactive')).toBe(false);
   });
 
   it('offers a CEFR Mapping section seeded with the Versant scale', () => {
@@ -333,6 +560,29 @@ describe('ConfigurationComponent', () => {
     typeInto(levelInput(rows()[1]), 'Below A1');
 
     expect(host().textContent).toContain('Level names must be unique');
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it('does not treat a stored mapping as unsaved edits when it differs from the default', () => {
+    // The fixture the suite flushes is the shipped default, so the draft and
+    // the stored mapping agree by accident and this went unnoticed. Push a
+    // genuinely customised mapping through a real reload: the draft must follow
+    // it, or Save Changes arms itself over a mapping nobody edited.
+    const customised: CefrScoreBand[] = [
+      { level: 'Low', min: 10, max: 50, color: 'red' },
+      { level: 'High', min: 51, max: 90, color: 'green' },
+    ];
+
+    cefr.load(true).subscribe();
+    http.expectOne(`${API_BASE}/configuration/cefr-mapping`).flush(customised);
+    fixture.detectChanges();
+
+    expect(component.mappingDraft().map((band) => band.level)).toEqual(['Low', 'High']);
+    expect(component.mappingDirty()).toBe(false);
+    expect(component.canSaveMapping()).toBe(false);
+
+    // The button only exists on the mapping tab, and it must be inert.
+    openMapping();
     expect(saveButton().disabled).toBe(true);
   });
 
@@ -412,11 +662,13 @@ describe('ConfigurationComponent', () => {
     openMapping();
     const initial = rows().length;
 
+    const removedLevel = levelInput(rows()[3]).value;
     rows()[3].querySelector<HTMLButtonElement>('.action-btn--danger')?.click();
     fixture.detectChanges();
+    confirmDelete();
 
     expect(rows().length).toBe(initial - 1);
-    expect(rows().map((row) => levelInput(row).value)).not.toContain('A2+');
+    expect(rows().map((row) => levelInput(row).value)).not.toContain(removedLevel);
   });
 
   it('restores the shipped Versant mapping on reset', () => {

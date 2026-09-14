@@ -154,6 +154,33 @@
   min-width: 0;
 }
 
+.assessment-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* A retired assessment stays configured but leaves the results table, so it is
+   dimmed rather than hidden — it is still there to bring back. */
+.status-badge {
+  flex-shrink: 0;
+  padding: 0.0625rem 0.4375rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: var(--color-muted);
+  color: #64748b;
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.assessment-card--inactive .assessment-name,
+.assessment-card--inactive .assessment-desc {
+  opacity: 0.6;
+}
+
 .assessment-name {
   font-family: var(--font-heading);
   font-size: 0.9375rem;
@@ -325,6 +352,88 @@
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--color-foreground);
+}
+
+/* ── Status switch ─────────────────────────────────────────── */
+
+/* The real checkbox is kept in the layout but invisible, so keyboard focus,
+   the label association and `role="switch"` all still work. */
+.switch {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  cursor: pointer;
+}
+
+.switch-input {
+  /* Visually hidden, not `display: none`: the input stays in the accessibility
+     tree, keeps focus and stays the label's control. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  appearance: none;
+}
+
+.switch-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  margin-top: 0.0625rem;
+  border-radius: var(--radius-full);
+  background: var(--color-ring);
+  transition: background-color 0.15s ease;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-card);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.25);
+  transition: transform 0.15s ease;
+}
+
+.switch-input:checked + .switch-track {
+  background: var(--color-success);
+}
+
+.switch-input:checked + .switch-track .switch-thumb {
+  transform: translateX(16px);
+}
+
+/* Focus lands on the hidden input, so the ring is drawn on the track. */
+.switch-input:focus-visible + .switch-track {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.0625rem;
+  min-width: 0;
+}
+
+.switch-state {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.switch-hint {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-muted-foreground);
 }
 
 .field-input,

@@ -1,6 +1,7 @@
 package com.bizzskill.portal.assessment.service;
 
 import com.bizzskill.portal.assessment.dto.TraineeAssessmentResponse;
+import com.bizzskill.portal.assessment.dto.TraineeLookupResponse;
 import com.bizzskill.portal.assessment.dto.TraineeResultResponse;
 import com.bizzskill.portal.assessment.dto.TraineeResultsRequest;
 import com.bizzskill.portal.assessment.entity.AppAssessment;
@@ -13,9 +14,15 @@ import com.bizzskill.portal.assessment.repository.AppLapRemedialRepository;
 import com.bizzskill.portal.common.enums.LapStatus;
 import com.bizzskill.portal.common.enums.LapTrack;
 import com.bizzskill.portal.common.error.ApiErrorResponse.FieldViolation;
+import com.bizzskill.portal.common.enums.TrackFilter;
 import com.bizzskill.portal.common.error.RequestValidationException;
+import com.bizzskill.portal.common.web.PageQuery;
+import com.bizzskill.portal.common.web.PageResponse;
+import com.bizzskill.portal.common.web.SortQuery;
 import com.bizzskill.portal.organization.entity.Participant;
 import com.bizzskill.portal.security.PortalPrincipal;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,6 +46,20 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class AssessmentRosterService {
 
+    /**
+     * The order pages are cut from.
+     *
+     * <p>Name first, which is the order the table shows. The employee number breaks
+     * ties, because two trainees can share a name and a page boundary between equal
+     * keys may otherwise return one of them twice and never return the other.
+     */
+    private static final Sort ROSTER_TIE_BREAKERS = Sort.by(
+            Sort.Order.asc("txtParticipantName"), Sort.Order.asc("intEmployeeId"));
+
+    /** Sort keys the roster accepts, mapped to entity properties. */
+    private static final Map<String, String> ROSTER_SORTABLE =
+            Map.of("name", "txtParticipantName", "employeeId", "intEmployeeId");
+
     private final TraineeScopeService scope;
     private final AppAssessmentRepository assessments;
     private final AppAssessmentResultRepository results;
@@ -61,16 +82,33 @@ public class AssessmentRosterService {
         this.cefrMapping = cefrMapping;
     }
 
-    /** The roster of a filtered group, with each trainee's results and track. */
-    public List<TraineeAssessmentResponse> roster(
-            PortalPrincipal caller, String locationId, Long batchId, Long lgId) {
+    /**
+     * One page of a filtered group's roster, with each trainee's results and track.
+     *
+     * <p>Paged in the database, not in memory: the scope, search and track filters
+     * are all part of the query that selects the page, so a group of ten thousand
+     * costs the same as a group of ten. Only the page's employee ids are then used
+     * to fetch results and tracks, so the per-page work stays proportional to the
+     * page rather than to the group.
+     */
+    public PageResponse<TraineeAssessmentResponse> roster(
+            PortalPrincipal caller,
+            String locationId,
+            Long batchId,
+            Long lgId,
+            PageQuery paging,
+            TrackFilter track,
+            String sort,
+            String direction) {
 
-        List<Participant> trainees = scope.find(caller, locationId, batchId, lgId).stream()
-                .filter(participant -> participant.getIntEmployeeId() != null)
-                .toList();
+        Sort order = SortQuery.resolve(sort, direction, ROSTER_SORTABLE, ROSTER_TIE_BREAKERS);
 
+        Page<Participant> page =
+                scope.page(caller, locationId, batchId, lgId, paging, track, order);
+
+        List<Participant> trainees = page.getContent();
         if (trainees.isEmpty()) {
-            return List.of();
+            return PageResponse.of(List.of(), page.getNumber(), page.getSize(), page.getTotalElements());
         }
 
         List<Long> employeeIds = trainees.stream().map(Participant::getIntEmployeeId).toList();
@@ -88,13 +126,46 @@ public class AssessmentRosterService {
         // Loaded once and reused for every score on the roster.
         List<AppCefrBand> bands = cefrMapping.orderedBands();
 
-        return trainees.stream()
+        List<TraineeAssessmentResponse> rows = trainees.stream()
                 .map(trainee -> toRow(
                         trainee,
                         resultsByEmployee.getOrDefault(trainee.getIntEmployeeId(), List.of()),
                         tracksByEmployee.getOrDefault(trainee.getIntEmployeeId(), List.of()),
                         bands))
                 .toList();
+
+        return PageResponse.of(rows, page.getNumber(), page.getSize(), page.getTotalElements());
+    }
+
+    /**
+     * Resolves the employee numbers a sheet names against one group.
+     *
+     * <p>Lets the upload preview judge the sheet without downloading the group. The
+     * preview needs two things — which of the sheet's numbers are really in the group,
+     * and how many trainees the sheet left out — so this answers exactly those: the
+     * matching trainees, and a count. Results and CEFR levels, which are the bulk of a
+     * roster response, are left out because the preview scores nothing with them.
+     *
+     * <p>Runs two queries, and the count is a count: how many numbers were sent does
+     * not change the cost of either.
+     */
+    public TraineeLookupResponse lookup(
+            PortalPrincipal caller,
+            String locationId,
+            Long batchId,
+            Long lgId,
+            List<Long> employeeIds) {
+
+        List<TraineeLookupResponse.TraineeRef> found =
+                scope.findWithin(caller, locationId, batchId, lgId, employeeIds).stream()
+                        .filter(participant -> participant.getIntEmployeeId() != null)
+                        .map(participant -> new TraineeLookupResponse.TraineeRef(
+                                String.valueOf(participant.getIntEmployeeId()),
+                                participant.getTxtParticipantName()))
+                        .toList();
+
+        return new TraineeLookupResponse(
+                scope.count(caller, locationId, batchId, lgId), found);
     }
 
     /**

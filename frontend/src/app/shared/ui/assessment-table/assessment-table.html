@@ -1,4 +1,4 @@
-<div class="table-card">
+<div class="table-card" [class.is-loading]="loading()" [attr.aria-busy]="loading() ? 'true' : null">
   <!-- ── Search ─────────────────────────────────────────────── -->
   <div class="table-toolbar">
     <div class="table-search">
@@ -6,7 +6,7 @@
       <input
         type="search"
         class="table-search-input"
-        [value]="query()"
+        [value]="draftQuery()"
         placeholder="Search by name or employee ID"
         aria-label="Search trainees by name or employee ID"
         (input)="onSearchInput($event)"
@@ -136,7 +136,7 @@
           <tr>
             <td class="td-empty" [attr.colspan]="columnCount()">
               @if (isSearching()) {
-                No trainees match “{{ query().trim() }}”.
+                No trainees match “{{ searchQuery().trim() }}”.
                 <button type="button" class="td-empty-clear" (click)="clearSearch()">
                   Clear search
                 </button>
@@ -168,7 +168,7 @@
         <button
           type="button"
           class="pagination-btn"
-          [disabled]="!table.getCanPreviousPage()"
+          [disabled]="loading() || !canPreviousPage()"
           aria-label="First page"
           (click)="goToFirstPage()"
         >
@@ -177,7 +177,7 @@
         <button
           type="button"
           class="pagination-btn"
-          [disabled]="!table.getCanPreviousPage()"
+          [disabled]="loading() || !canPreviousPage()"
           aria-label="Previous page"
           (click)="previousPage()"
         >
@@ -204,7 +204,7 @@
         <button
           type="button"
           class="pagination-btn"
-          [disabled]="!table.getCanNextPage()"
+          [disabled]="loading() || !canNextPage()"
           aria-label="Next page"
           (click)="nextPage()"
         >
@@ -213,7 +213,7 @@
         <button
           type="button"
           class="pagination-btn"
-          [disabled]="!table.getCanNextPage()"
+          [disabled]="loading() || !canNextPage()"
           aria-label="Last page"
           (click)="goToLastPage()"
         >

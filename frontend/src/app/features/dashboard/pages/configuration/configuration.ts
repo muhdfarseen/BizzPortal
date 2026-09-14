@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   reiconTask,
@@ -18,9 +18,10 @@ import {
   cefrColor,
   isValidScore,
 } from '../../../../core/models/assessment.model';
-import { AssessmentService } from '../../../../core/services/assessment.service';
+import { AssessmentService, AssessmentStatus } from '../../../../core/services/assessment.service';
 import { CefrMappingService } from '../../../../core/services/cefr-mapping.service';
 import { ToastService } from '../../../../core/ui/toast.service';
+import { ConfirmDialogComponent } from '../../../../shared/ui/confirm-dialog/confirm-dialog';
 
 /* ── Assessment config model ──────────────────────────────── */
 
@@ -30,6 +31,8 @@ export interface AssessmentConfig {
   description: string;
   /** Highest achievable score; the API requires one on every write. */
   maxScore: number;
+  /** Retired assessments stay configured but leave the results table. */
+  status: AssessmentStatus;
 }
 
 /** One editable row of the CEFR mapping; text fields stay raw while typing. */
@@ -41,10 +44,20 @@ interface MappingDraft {
   color: string;
 }
 
+/**
+ * The destructive action awaiting confirmation.
+ *
+ * Both deletes on this page share one dialog, so the prompt cannot drift into
+ * two subtly different warnings; only the wording and the work to do differ.
+ */
+type PendingDelete =
+  | { kind: 'assessment'; assessment: AssessmentConfig }
+  | { kind: 'band'; level: string; index: number };
+
 @Component({
   selector: 'app-configuration',
   standalone: true,
-  imports: [NgIcon],
+  imports: [NgIcon, ConfirmDialogComponent],
   providers: [
     provideIcons({
       reiconTask,
@@ -56,6 +69,11 @@ interface MappingDraft {
       reiconArrowsRotate,
     }),
   ],
+  host: {
+    // Escape dismisses the delete confirmation first, then the edit dialog —
+    // the same order User Management uses.
+    '(document:keydown.escape)': 'onEscape()',
+  },
   templateUrl: './configuration.html',
   styleUrl: './configuration.css',
 })
@@ -81,6 +99,7 @@ export class ConfigurationComponent {
       name: assessment.name,
       description: assessment.description,
       maxScore: assessment.maxScore,
+      status: assessment.status,
     })),
   );
 
@@ -89,6 +108,9 @@ export class ConfigurationComponent {
   readonly editingAssessment = signal<AssessmentConfig | null>(null);
   readonly formName = signal('');
   readonly formDescription = signal('');
+
+  /** Lifecycle state held by the edit dialog. A new assessment is always active. */
+  readonly formStatus = signal<AssessmentStatus>('active');
 
   /** ── CEFR mapping state ────────────────────────────────── */
 
@@ -107,13 +129,34 @@ export class ConfigurationComponent {
   /** The editable copy of the saved mapping. */
   readonly mappingDraft = signal<MappingDraft[]>([]);
 
+  /**
+   * Whether the user has changed the draft. A mapping that arrives after they
+   * have started editing must not overwrite their work.
+   */
+  private draftEdited = false;
+
   constructor() {
-    this.mappingDraft.set(this.toDraft(this.cefrMappingService.bands()));
     this.assessmentService.loadAllExams().subscribe({
       // Already reported by the error interceptor; the page just shows nothing.
       error: () => undefined,
     });
   }
+
+  /**
+   * Keep the draft in step with the stored mapping until the user takes over.
+   *
+   * The service starts on the shipped default and swaps in the API's mapping
+   * once it arrives, so seeding the draft once at construction — which is what
+   * this did — leaves it holding the default whenever the page is opened
+   * directly. That reads as unsaved edits against the real mapping, arming
+   * Save Changes to overwrite a configured mapping with the shipped one.
+   */
+  private readonly seedDraftFromStore = effect(() => {
+    const stored = this.cefrMappingService.bands();
+    if (!this.draftEdited) {
+      this.mappingDraft.set(this.toDraft(stored));
+    }
+  });
 
   selectSidebarItem(id: string): void {
     this.activeSidebarItem.set(id);
@@ -125,6 +168,9 @@ export class ConfigurationComponent {
     this.editingAssessment.set(null);
     this.formName.set('');
     this.formDescription.set('');
+    // Creating always starts active: an assessment that arrives retired cannot
+    // score anything, and the API defaults to active when none is given.
+    this.formStatus.set('active');
     this.isDialogOpen.set(true);
   }
 
@@ -132,12 +178,29 @@ export class ConfigurationComponent {
     this.editingAssessment.set(assessment);
     this.formName.set(assessment.name);
     this.formDescription.set(assessment.description);
+    this.formStatus.set(assessment.status);
     this.isDialogOpen.set(true);
+  }
+
+  /** Reads the dialog's status switch. */
+  onStatusChange(event: Event): void {
+    this.formStatus.set((event.target as HTMLInputElement).checked ? 'active' : 'inactive');
   }
 
   closeDialog(): void {
     this.isDialogOpen.set(false);
     this.editingAssessment.set(null);
+  }
+
+  /** Escape closes the delete confirmation, or the dialog behind it. */
+  onEscape(): void {
+    if (this.pendingDelete()) {
+      this.cancelDelete();
+      return;
+    }
+    if (this.isDialogOpen()) {
+      this.closeDialog();
+    }
   }
 
   onFormNameInput(event: Event): void {
@@ -155,7 +218,13 @@ export class ConfigurationComponent {
 
     const editing = this.editingAssessment();
     const request = editing
-      ? this.assessmentService.updateExam(editing.id, name, desc, editing.maxScore)
+      ? this.assessmentService.updateExam(
+          editing.id,
+          name,
+          desc,
+          editing.maxScore,
+          this.formStatus(),
+        )
       : this.assessmentService.createExam(name, desc, DEFAULT_MAX_SCORE);
 
     request.subscribe({
@@ -170,8 +239,87 @@ export class ConfigurationComponent {
     });
   }
 
-  deleteAssessment(id: string): void {
-    this.assessmentService.deleteExam(id).subscribe({
+  /* ── Destructive actions ──────────────────────────────────── */
+
+  /** The delete the user has asked for and not yet confirmed, if any. */
+  readonly pendingDelete = signal<PendingDelete | null>(null);
+
+  /**
+   * Wording for the pending confirmation, or `null` when nothing is pending.
+   *
+   * The API refuses to delete an assessment that already has results, so the
+   * prompt says so rather than promising a delete that will be rejected — a
+   * warning about the wrong consequence teaches the user to ignore warnings.
+   */
+  readonly confirmCopy = computed<{
+    title: string;
+    subtitle: string;
+    message: string;
+    confirmLabel: string;
+  } | null>(() => {
+    const pending = this.pendingDelete();
+    if (!pending) {
+      return null;
+    }
+
+    if (pending.kind === 'assessment') {
+      return {
+        title: 'Delete assessment',
+        subtitle: pending.assessment.name,
+        message:
+          'It is removed from the assessment list for good. An assessment that already ' +
+          'holds recorded results cannot be deleted; deactivate it instead to take it ' +
+          'out of the results table without losing those results.',
+        confirmLabel: 'Delete assessment',
+      };
+    }
+
+    return {
+      title: 'Remove CEFR level',
+      subtitle: pending.level,
+      message:
+        'It is dropped from the mapping when you save. Results already recorded keep ' +
+        'their score and level.',
+      confirmLabel: 'Remove level',
+    };
+  });
+
+  /** Asks before deleting an assessment. */
+  requestDeleteAssessment(assessment: AssessmentConfig): void {
+    this.pendingDelete.set({ kind: 'assessment', assessment });
+  }
+
+  /** Asks before dropping a level from the mapping. */
+  requestRemoveBand(index: number): void {
+    const band = this.mappingDraft()[index];
+    if (!band) {
+      return;
+    }
+    this.openPalette.set(null);
+    this.pendingDelete.set({ kind: 'band', level: band.level.trim() || 'this level', index });
+  }
+
+  cancelDelete(): void {
+    this.pendingDelete.set(null);
+  }
+
+  /** Carries out the delete the user confirmed. */
+  confirmDelete(): void {
+    const pending = this.pendingDelete();
+    if (!pending) {
+      return;
+    }
+    this.pendingDelete.set(null);
+
+    if (pending.kind === 'band') {
+      this.draftEdited = true;
+      this.mappingDraft.update((draft) =>
+        draft.filter((_, position) => position !== pending.index),
+      );
+      return;
+    }
+
+    this.assessmentService.deleteExam(pending.assessment.id).subscribe({
       next: () => this.toasts.success('Assessment deleted'),
       error: () => undefined,
     });
@@ -251,6 +399,7 @@ export class ConfigurationComponent {
 
   /** Appends an empty band for a new level. */
   addBand(): void {
+    this.draftEdited = true;
     const draft = this.mappingDraft();
     const lastMax = draft.length ? Number(draft[draft.length - 1].max) : Number.NaN;
     const canContinue = Number.isFinite(lastMax) && lastMax < DEFAULT_MAX_SCORE;
@@ -265,11 +414,6 @@ export class ConfigurationComponent {
         ? { level: '', min: String(min), max: String(DEFAULT_MAX_SCORE), color }
         : { level: '', min: '', max: '', color },
     ]);
-  }
-
-  removeBand(index: number): void {
-    this.openPalette.set(null);
-    this.mappingDraft.update((draft) => draft.filter((_, position) => position !== index));
   }
 
   /** Opens (or closes) the colour palette of one row. */
@@ -323,6 +467,7 @@ export class ConfigurationComponent {
   }
 
   private updateBand(index: number, change: Partial<MappingDraft>): void {
+    this.draftEdited = true;
     this.mappingDraft.update((draft) =>
       draft.map((band, position) => (position === index ? { ...band, ...change } : band)),
     );

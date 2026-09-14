@@ -4,7 +4,6 @@ import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { AssessmentFilter, cefrFromScore } from '../models/assessment.model';
 import { UploadPreview } from '../models/assessment-upload.model';
-import { AssessmentService } from './assessment.service';
 import { AssessmentUploadService } from './assessment-upload.service';
 import { FileDownloadService } from './file-download.service';
 import {
@@ -12,7 +11,6 @@ import {
   ApiTraineeFixture,
   flushCefr,
   flushExams,
-  flushTrainees,
   traineeRows,
 } from '../../testing/api-testing';
 
@@ -73,7 +71,6 @@ function xlsxBytes(): ArrayBuffer {
 
 describe('AssessmentUploadService', () => {
   let service: AssessmentUploadService;
-  let assessments: AssessmentService;
   let http: HttpTestingController;
   let download: ReturnType<typeof vi.fn>;
 
@@ -87,7 +84,6 @@ describe('AssessmentUploadService', () => {
       ],
     });
     service = TestBed.inject(AssessmentUploadService);
-    assessments = TestBed.inject(AssessmentService);
     http = TestBed.inject(HttpTestingController);
     // The two services behind this one read their configuration on construction.
     flushExams(http);
@@ -96,10 +92,11 @@ describe('AssessmentUploadService', () => {
 
   afterEach(() => http.verify());
 
-  /** Loads the group's roster so `preview` can be exercised. */
-  function loadRoster(): void {
-    assessments.getTrainees(FILTER).subscribe();
-    flushTrainees(http, ROSTER, (params) => params.get('lgId') === '1004');
+  /** The lookup a preview makes, so its body can be asserted before it is flushed. */
+  function lookupRequest() {
+    return http.expectOne(
+      (candidate) => candidate.url === `${API_BASE}/assessments/trainees/lookup`,
+    );
   }
 
   it('reads a CSV file into a matrix of cells', async () => {
@@ -153,8 +150,7 @@ describe('AssessmentUploadService', () => {
     );
   });
 
-  it('validates a sheet against the group roster the API returns', () => {
-    loadRoster();
+  it('validates a sheet against the group the lookup answers with', () => {
     const [trainee] = ROSTER;
 
     let validRows = -1;
@@ -169,7 +165,12 @@ describe('AssessmentUploadService', () => {
         cefr = preview.rows[0].cefr;
       });
 
-    flushTrainees(http, ROSTER, (params) => params.get('lgId') === '1004');
+    // Only the number the sheet named is asked about — never the whole group.
+    const request = lookupRequest();
+    expect((request.request.body as { employeeIds: number[] }).employeeIds).toEqual([
+      Number(trainee.employeeId),
+    ]);
+    request.flush({ groupSize: ROSTER.length, trainees: [{ ...trainee }] });
 
     expect(validRows).toBe(1);
     expect(cefr).toBe(cefrFromScore(70));
@@ -181,13 +182,11 @@ describe('AssessmentUploadService', () => {
       sheetError = preview.sheetError;
     });
 
-    http.expectNone((candidate) => candidate.url === `${API_BASE}/assessments/trainees`);
+    http.expectNone((candidate) => candidate.url === `${API_BASE}/assessments/trainees/lookup`);
     expect(sheetError).toContain('Choose an assessment');
   });
 
   it('refuses ids that are not in the selected group', () => {
-    loadRoster();
-
     let preview: { validRows: number; rows: readonly { errors: readonly { code: string }[] }[] } = {
       validRows: -1,
       rows: [],
@@ -199,14 +198,15 @@ describe('AssessmentUploadService', () => {
       ])
       .subscribe((result) => (preview = result));
 
-    flushTrainees(http, ROSTER, (params) => params.get('lgId') === '1004');
+    const request = lookupRequest();
+    expect((request.request.body as { employeeIds: number[] }).employeeIds).toEqual([99999]);
+    request.flush({ groupSize: ROSTER.length, trainees: [] });
 
     expect(preview.validRows).toBe(0);
     expect(preview.rows[0].errors[0].code).toBe('unknown-empid');
   });
 
   it('posts the accepted rows and skips the rejected ones', () => {
-    loadRoster();
     const [trainee] = ROSTER;
 
     let preview: UploadPreview = {
@@ -224,28 +224,32 @@ describe('AssessmentUploadService', () => {
       ])
       .subscribe((result) => (preview = result));
 
-    flushTrainees(http, ROSTER, (params) => params.get('lgId') === '1004');
+    const request = lookupRequest();
+    expect((request.request.body as { employeeIds: number[] }).employeeIds).toEqual([
+      Number(trainee.employeeId),
+      99999,
+    ]);
+    request.flush({ groupSize: ROSTER.length, trainees: [{ ...trainee }] });
     expect(preview.validRows).toBe(1);
 
     let saved = -1;
     service.commit(FILTER, '1', preview.rows).subscribe((count) => (saved = count));
 
-    const request = http.expectOne(`${API_BASE}/assessments/uploads`);
-    expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual({
+    const upload = http.expectOne(`${API_BASE}/assessments/uploads`);
+    expect(upload.request.method).toBe('POST');
+    expect(upload.request.body).toEqual({
       examId: '1',
       locationId: 'BLR',
       batchId: 103,
       lgId: 1004,
       rows: [{ employeeId: trainee.employeeId, score: 70 }],
     });
-    request.flush({ saved: 1 });
+    upload.flush({ saved: 1 });
 
     expect(saved).toBe(1);
   });
 
   it('names the assessment being uploaded, so no other result is touched', () => {
-    loadRoster();
     const [trainee] = ROSTER;
 
     service
@@ -271,8 +275,7 @@ describe('AssessmentUploadService', () => {
     request.flush({ saved: 1 });
   });
 
-  it('reports how many of the group the sheet left out', () => {
-    loadRoster();
+  it('reports how many of the group the sheet left out from the group size', () => {
     const [trainee] = ROSTER;
 
     let missingFromSheet = -1;
@@ -283,15 +286,14 @@ describe('AssessmentUploadService', () => {
       ])
       .subscribe((preview) => (missingFromSheet = preview.missingFromSheet));
 
-    flushTrainees(http, ROSTER, (params) => params.get('lgId') === '1004');
+    // The lookup sends only the ids it found, so the count of the whole group
+    // is the only thing that can say the other 249 were not in the sheet.
+    lookupRequest().flush({ groupSize: 250, trainees: [{ ...trainee }] });
 
-    // The roster holds two trainees; the sheet lists one of them.
-    expect(missingFromSheet).toBe(ROSTER.length - 1);
+    expect(missingFromSheet).toBe(249);
   });
 
-  it('explains a sheet that is missing the Score column', () => {
-    loadRoster();
-
+  it('explains a sheet that is missing the Score column without asking the group', () => {
     let sheetError: string | null = null;
     service
       .preview(FILTER, '1', [
@@ -300,14 +302,13 @@ describe('AssessmentUploadService', () => {
       ])
       .subscribe((preview) => (sheetError = preview.sheetError));
 
-    flushTrainees(http, ROSTER, (params) => params.get('lgId') === '1004');
+    // The employee-id column cannot be read either, so there is nothing to look up.
+    http.expectNone((candidate) => candidate.url === `${API_BASE}/assessments/trainees/lookup`);
 
     expect(sheetError).toContain('Score');
   });
 
   it('surfaces the API error when an upload is rejected', () => {
-    loadRoster();
-
     let status = 0;
     let message = '';
     service

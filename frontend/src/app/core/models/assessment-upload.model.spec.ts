@@ -1,9 +1,10 @@
-import { AssessmentExam, TraineeAssessment } from './assessment.model';
+import { AssessmentExam, TraineeAssessment, TraineeLookup } from './assessment.model';
 import {
   UploadPreview,
   buildErrorCsv,
   buildTemplateCsv,
   parseCsv,
+  sheetEmployeeIds,
   sheetKind,
   toCsv,
   validateUpload,
@@ -17,13 +18,23 @@ const ROSTER: readonly TraineeAssessment[] = [
   { employeeId: 'EMP-3', name: 'Rahul Das', results: {} },
 ];
 
+/**
+ * The roster as the lookup answers it: only the ids a sheet asked about, plus
+ * the count of the whole group. Here the sheet asks about all of them, which is
+ * what the old roster-based validation saw.
+ */
+const GROUP: TraineeLookup = {
+  groupSize: ROSTER.length,
+  trainees: ROSTER.map(({ employeeId, name }) => ({ employeeId, name })),
+};
+
 /** Stand-in for the configured CEFR mapping, so the specs stay about validation. */
 function levelFor(score: number): string {
   return score >= 60 ? 'B2' : 'A2';
 }
 
-function validate(rows: readonly (readonly string[])[]) {
-  return validateUpload({ rows, roster: ROSTER, exam: EXAM, levelFor });
+function validate(rows: readonly (readonly string[])[], group: TraineeLookup = GROUP) {
+  return validateUpload({ rows, group, exam: EXAM, levelFor });
 }
 
 const HEADER = ['Emp ID', 'Name', 'Score'];
@@ -119,6 +130,29 @@ describe('validateUpload', () => {
     const preview = validate([HEADER, ['EMP-1', 'Aarav Nair', '45']]);
 
     expect(preview.validRows).toBe(1);
+    expect(preview.missingFromSheet).toBe(2);
+  });
+
+  it('takes how many the sheet left out from the group size, not from the ids returned', () => {
+    // The lookup answers with only the ids the sheet named, so the roster's
+    // length is the number it found — the count of the whole group is the only
+    // thing that can say how many it did not.
+    const preview = validate([HEADER, ['EMP-1', 'Aarav Nair', '45']], {
+      groupSize: 500,
+      trainees: [{ employeeId: 'EMP-1', name: 'Aarav Nair' }],
+    });
+
+    expect(preview.validRows).toBe(1);
+    expect(preview.missingFromSheet).toBe(499);
+  });
+
+  it('counts an employee id listed twice once when reporting the shortfall', () => {
+    const preview = validate([
+      HEADER,
+      ['EMP-1', 'Aarav Nair', '45'],
+      ['EMP-1', 'Aarav Nair', '60'],
+    ]);
+
     expect(preview.missingFromSheet).toBe(2);
   });
 
@@ -224,6 +258,36 @@ describe('validateUpload', () => {
     ]);
 
     expect(preview.rows.map((row) => row.rowNumber)).toEqual([2, 3]);
+  });
+});
+
+describe('sheetEmployeeIds', () => {
+  it('reads the distinct numeric employee ids a sheet names', () => {
+    expect(
+      sheetEmployeeIds([HEADER, ['41201', 'Aarav Nair', '45'], ['41202', 'Meera Iyer', '78']]),
+    ).toEqual([41201, 41202]);
+  });
+
+  it('lists a number once however often the sheet repeats it', () => {
+    expect(sheetEmployeeIds([HEADER, ['41201', 'Aarav', '45'], ['41201', 'Aarav', '60']])).toEqual([
+      41201,
+    ]);
+  });
+
+  it('drops values the lookup could not take, and blank rows', () => {
+    expect(
+      sheetEmployeeIds([HEADER, ['EMP-1', 'Aarav', '45'], ['', '', ''], ['0', 'X', '1']]),
+    ).toEqual([]);
+  });
+
+  it('names no ids when the header cannot be read', () => {
+    expect(
+      sheetEmployeeIds([
+        ['Who', 'Score'],
+        ['41201', '45'],
+      ]),
+    ).toEqual([]);
+    expect(sheetEmployeeIds([])).toEqual([]);
   });
 });
 

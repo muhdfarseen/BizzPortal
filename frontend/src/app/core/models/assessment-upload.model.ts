@@ -1,4 +1,4 @@
-import { AssessmentExam, TraineeAssessment, isValidScore } from './assessment.model';
+import { AssessmentExam, TraineeAssessment, TraineeLookup, isValidScore } from './assessment.model';
 
 /**
  * Bulk score upload: the template admins download, the sheet they send back and
@@ -154,6 +154,36 @@ function isBlankRow(row: readonly SheetCell[]): boolean {
 }
 
 /**
+ * The distinct employee numbers a sheet names, ready for a lookup.
+ *
+ * Only numeric values are returned: the lookup takes numbers, so anything else
+ * could not be resolved against the group anyway and is reported as an unknown
+ * employee id by {@link validateUpload} instead. A sheet whose header cannot be
+ * read names no ids, because there is no column to find them in.
+ */
+export function sheetEmployeeIds(rows: readonly (readonly SheetCell[])[]): number[] {
+  if (rows.length === 0) {
+    return [];
+  }
+  const map = mapHeaderRow(rows[0]);
+  if (!map) {
+    return [];
+  }
+
+  const ids = new Set<number>();
+  for (const [index, row] of rows.entries()) {
+    if (index === 0 || isBlankRow(row)) {
+      continue;
+    }
+    const value = Number(cellText(row[map.employeeId]));
+    if (Number.isInteger(value) && value > 0) {
+      ids.add(value);
+    }
+  }
+  return [...ids];
+}
+
+/**
  * Parses CSV text (RFC 4180): quoted fields may hold commas, newlines and
  * escaped `""` quotes, and both CRLF and LF end a record. A leading BOM is
  * dropped so the first header still matches.
@@ -275,8 +305,12 @@ export function buildErrorCsv(preview: UploadPreview): string {
 export interface ValidateUploadOptions {
   /** The sheet, header row included. */
   rows: readonly (readonly SheetCell[])[];
-  /** The trainees of the selected group — the only ids that may be uploaded. */
-  roster: readonly TraineeAssessment[];
+  /**
+   * The group the sheet is judged against: the requested employee numbers it
+   * holds, plus the count of the whole group. The roster itself is never sent —
+   * the lookup answers only what a preview actually asks.
+   */
+  group: TraineeLookup;
   /** The one assessment being uploaded, supplying the score ceiling. */
   exam: AssessmentExam;
   /** Maps a score to its level, so the preview matches the configured CEFR scale. */
@@ -300,7 +334,7 @@ const EMPTY_PREVIEW: UploadPreview = {
  * typo cannot add a trainee that the group does not contain.
  */
 export function validateUpload(options: ValidateUploadOptions): UploadPreview {
-  const { rows, roster, exam, levelFor } = options;
+  const { rows, group, exam, levelFor } = options;
 
   if (rows.length === 0) {
     return { ...EMPTY_PREVIEW, sheetError: 'The file is empty.' };
@@ -315,7 +349,7 @@ export function validateUpload(options: ValidateUploadOptions): UploadPreview {
   }
 
   const map = mapHeaderRow(rows[0]) as ColumnMap;
-  const byEmployeeId = new Map(roster.map((trainee) => [trainee.employeeId, trainee]));
+  const byEmployeeId = new Map(group.trainees.map((trainee) => [trainee.employeeId, trainee]));
   const seen = new Set<string>();
   const previewRows: UploadPreviewRow[] = [];
   const covered = new Set<string>();
@@ -398,6 +432,9 @@ export function validateUpload(options: ValidateUploadOptions): UploadPreview {
     rows: previewRows,
     validRows,
     errorRows: previewRows.length - validRows,
-    missingFromSheet: roster.filter((trainee) => !covered.has(trainee.employeeId)).length,
+    // The lookup returns how many the group holds in total and which of the
+    // sheet's numbers it contains, so the shortfall is the difference. `covered`
+    // is a set, so a number listed twice is still one trainee.
+    missingFromSheet: Math.max(0, group.groupSize - covered.size),
   };
 }

@@ -113,21 +113,19 @@
       @if (showLocations()) {
         <section class="form-section">
           <h3 class="section-title">Assigned locations</h3>
-          <div class="checkbox-grid" role="group" aria-label="Assigned locations">
-            @for (location of locations(); track location.id) {
-              <label class="checkbox-item" [class.is-checked]="isLocationSelected(location.id)">
-                <input
-                  type="checkbox"
-                  [checked]="isLocationSelected(location.id)"
-                  (change)="toggleLocation(location.id)"
-                />
-                <span>{{ location.name }}</span>
-              </label>
+          <div class="field">
+            <app-multi-select
+              [options]="locationOptions()"
+              [selected]="draft().locationIds"
+              placeholder="Select locations"
+              emptyMessage="No locations available."
+              ariaLabel="Assigned locations"
+              (selectedChange)="onLocationsChange($event)"
+            />
+            @if (locationError(); as error) {
+              <span class="field-error">{{ error }}</span>
             }
           </div>
-          @if (locationError(); as error) {
-            <span class="field-error">{{ error }}</span>
-          }
         </section>
       }
 
@@ -135,25 +133,23 @@
       @if (showBatches()) {
         <section class="form-section">
           <h3 class="section-title">Assigned batches</h3>
-          @if (batchChoices().length) {
-            <div class="checkbox-grid" role="group" aria-label="Assigned batches">
-              @for (batch of batchChoices(); track batch.id) {
-                <label class="checkbox-item" [class.is-checked]="isBatchSelected(batch.id)">
-                  <input
-                    type="checkbox"
-                    [checked]="isBatchSelected(batch.id)"
-                    (change)="toggleBatch(batch.id)"
-                  />
-                  <span>{{ batch.label }}</span>
-                </label>
-              }
-            </div>
-          } @else {
-            <p class="section-empty">Select a location to choose its batches.</p>
-          }
-          @if (batchError(); as error) {
-            <span class="field-error">{{ error }}</span>
-          }
+          <div class="field">
+            <app-multi-select
+              [options]="batchOptions()"
+              [selected]="draft().batchIds"
+              [searchable]="true"
+              [disabled]="batchOptions().length === 0"
+              placeholder="Select batches"
+              emptyMessage="No batches for the selected locations."
+              ariaLabel="Assigned batches"
+              (selectedChange)="onBatchesChange($event)"
+            />
+            @if (batchOptions().length === 0) {
+              <span class="field-hint">{{ batchHint() }}</span>
+            } @else if (batchError(); as error) {
+              <span class="field-error">{{ error }}</span>
+            }
+          </div>
         </section>
       }
 

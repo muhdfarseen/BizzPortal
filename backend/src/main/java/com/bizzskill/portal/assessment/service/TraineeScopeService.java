@@ -1,6 +1,9 @@
 package com.bizzskill.portal.assessment.service;
 
+import com.bizzskill.portal.assessment.repository.TraineeRosterSpecifications;
+import com.bizzskill.portal.common.enums.TrackFilter;
 import com.bizzskill.portal.common.error.NotFoundException;
+import com.bizzskill.portal.common.web.PageQuery;
 import com.bizzskill.portal.organization.entity.Batch;
 import com.bizzskill.portal.organization.entity.LearningGroup;
 import com.bizzskill.portal.organization.entity.Participant;
@@ -8,10 +11,14 @@ import com.bizzskill.portal.organization.repository.BatchRepository;
 import com.bizzskill.portal.organization.repository.LearningGroupRepository;
 import com.bizzskill.portal.organization.repository.ParticipantRepository;
 import com.bizzskill.portal.security.PortalPrincipal;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -56,38 +63,145 @@ public class TraineeScopeService {
     public List<Participant> find(
             PortalPrincipal caller, String locationId, Long batchId, Long lgId) {
 
+        ResolvedScope resolved = resolve(caller, locationId, batchId, lgId);
+
+        if (resolved.lgId() != null) {
+            return participants.findByIntLgIdInOrderByTxtParticipantNameAsc(Set.of(resolved.lgId()));
+        }
+
+        // null means unrestricted, empty means nothing is visible; the two must not
+        // collapse into one another.
+        if (resolved.batchIds() == null) {
+            return participants.findAllByOrderByTxtParticipantNameAsc();
+        }
+
+        return resolved.batchIds().isEmpty()
+                ? List.of()
+                : participants.findByIntBatchIdInOrderByTxtParticipantNameAsc(resolved.batchIds());
+    }
+
+    /**
+     * One page of trainees, narrowed to the caller's scope and to the given filters.
+     *
+     * <p>The sibling of {@link #find} for screens that page. The scope rules are
+     * resolved here exactly as they are for a full read — the same 403 for an
+     * out-of-scope group — so paging cannot become a way around them. The filters
+     * and the page are both applied in the database, so the total the client is
+     * given counts the filtered set rather than whatever happened to be loaded.
+     *
+     * <p>{@link #find} is still used by the reads that genuinely need every trainee
+     * of a group: the dashboard's totals and a bulk upload's commit. Those are
+     * aggregates over the whole set rather than a list someone scrolls.
+     *
+     * @param locationId optional location code.
+     * @param batchId    optional batch id; takes precedence over the location.
+     * @param lgId       optional learning group id; takes precedence over both.
+     * @param paging     the requested page and search text.
+     * @param track      optional LAP / Remedial filter, or null for every trainee.
+     * @param sort       the order pages are cut from; must be a total order.
+     */
+    public Page<Participant> page(
+            PortalPrincipal caller,
+            String locationId,
+            Long batchId,
+            Long lgId,
+            PageQuery paging,
+            TrackFilter track,
+            Sort sort) {
+
+        ResolvedScope resolved = resolve(caller, locationId, batchId, lgId);
+        Specification<Participant> spec =
+                TraineeRosterSpecifications.inScope(resolved.lgId(), resolved.batchIds());
+
+        Specification<Participant> search = TraineeRosterSpecifications.matchesSearch(paging.search());
+        if (search != null) {
+            spec = spec.and(search);
+        }
+
+        Specification<Participant> onTrack = TraineeRosterSpecifications.onTrack(track);
+        if (onTrack != null) {
+            spec = spec.and(onTrack);
+        }
+
+        return participants.findAll(spec, paging.toPageRequest(sort));
+    }
+
+    /**
+     * The named trainees of a group, narrowed to the caller's scope.
+     *
+     * <p>For a caller that already knows which employee numbers it cares about — a
+     * bulk upload holding the numbers in a sheet — so the group's other trainees are
+     * neither read nor sent.
+     */
+    public List<Participant> findWithin(
+            PortalPrincipal caller,
+            String locationId,
+            Long batchId,
+            Long lgId,
+            Collection<Long> employeeIds) {
+
+        ResolvedScope resolved = resolve(caller, locationId, batchId, lgId);
+
+        Specification<Participant> spec = TraineeRosterSpecifications.inScope(
+                resolved.lgId(), resolved.batchIds());
+
+        Specification<Participant> named = TraineeRosterSpecifications.hasEmployeeId(employeeIds);
+        if (named != null) {
+            spec = spec.and(named);
+        }
+
+        return participants.findAll(spec, Sort.by(Sort.Order.asc("intEmployeeId")));
+    }
+
+    /**
+     * How many trainees a group holds, narrowed to the caller's scope.
+     *
+     * <p>A count query rather than loading the group and taking its size: the bulk
+     * upload preview needs to know how many trainees the sheet left out, and paying
+     * for every row to learn a number would defeat the point of not loading them.
+     */
+    public long count(PortalPrincipal caller, String locationId, Long batchId, Long lgId) {
+        ResolvedScope resolved = resolve(caller, locationId, batchId, lgId);
+        return participants.count(
+                TraineeRosterSpecifications.inScope(resolved.lgId(), resolved.batchIds()));
+    }
+
+    /**
+     * The group a set of query parameters resolves to, with scope already enforced.
+     *
+     * <p>Shared by every paged read so the authorisation checks cannot be applied on
+     * one path and forgotten on another.
+     */
+    private record ResolvedScope(Long lgId, Collection<Long> batchIds) {
+    }
+
+    private ResolvedScope resolve(
+            PortalPrincipal caller, String locationId, Long batchId, Long lgId) {
+
         Set<Long> allowedBatches = allowedBatchIds(caller);
 
         if (lgId != null) {
             LearningGroup group = learningGroups.findById(lgId)
                     .orElseThrow(() -> NotFoundException.of("learning group", lgId));
             requireAllowedBatch(allowedBatches, group.getIntBatchId());
-            return participants.findByIntLgIdInOrderByTxtParticipantNameAsc(Set.of(lgId));
+            return new ResolvedScope(lgId, null);
         }
 
         if (batchId != null) {
             requireAllowedBatch(allowedBatches, batchId);
-            return participants.findByIntBatchIdInOrderByTxtParticipantNameAsc(Set.of(batchId));
+            return new ResolvedScope(null, Set.of(batchId));
         }
 
         if (locationId != null) {
             requireAllowedLocation(caller, locationId);
-            List<Long> batchIds = batches
+            return new ResolvedScope(null, batches
                     .findByTxtIlpLocationIdInOrderByTxtBatchNameAsc(List.of(locationId)).stream()
                     .map(Batch::getIntBatchId)
                     .filter(id -> allowedBatches == null || allowedBatches.contains(id))
-                    .toList();
-            return batchIds.isEmpty()
-                    ? List.of()
-                    : participants.findByIntBatchIdInOrderByTxtParticipantNameAsc(batchIds);
+                    .toList());
         }
 
-        if (allowedBatches == null) {
-            return participants.findAllByOrderByTxtParticipantNameAsc();
-        }
-        return allowedBatches.isEmpty()
-                ? List.of()
-                : participants.findByIntBatchIdInOrderByTxtParticipantNameAsc(allowedBatches);
+        return new ResolvedScope(null, allowedBatches);
     }
 
     /**

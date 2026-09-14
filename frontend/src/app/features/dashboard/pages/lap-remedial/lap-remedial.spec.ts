@@ -10,11 +10,28 @@ import {
   ApiTraineeFixture,
   SIGN_IN,
   flushStartup,
-  flushTrainees,
+  pageOf,
   signInWith,
   traineeRows,
 } from '../../../../testing/api-testing';
 import { LapRemedialComponent } from './lap-remedial';
+
+/** A trainee as the simulated server holds them, track included. */
+interface ServerRow extends ApiTraineeFixture {
+  status?: string;
+  remark?: string;
+  startDate?: string;
+}
+
+/** Twelve untracked trainees: the No LAP / Remedial tab fills its first page. */
+function untrackedServer(): ServerRow[] {
+  return traineeRows(12).map(({ employeeId, name, results }) => ({ employeeId, name, results }));
+}
+
+/** Twelve trainees with a lap and a remedial: every tab holds somebody. */
+function trackedServer(): ServerRow[] {
+  return traineeRows(12).map((row) => ({ ...row }));
+}
 
 /** The dropdown is attached on a macrotask, so let it settle. */
 async function flushOverlay(): Promise<void> {
@@ -22,19 +39,11 @@ async function flushOverlay(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-/** Strips the track from a roster, so every tab but one starts empty. */
-function untracked(rows: readonly ApiTraineeFixture[]): ApiTraineeFixture[] {
-  return rows.map(({ employeeId, name, results }) => ({ employeeId, name, results }));
-}
-
-/** Twelve trainees on no track: the No LAP / Remedial tab fills its first page of ten. */
-const UNTRACKED_ROSTER: readonly ApiTraineeFixture[] = untracked(traineeRows(12));
-
-/** Twelve trainees with a lap, a remedial and ten without: every tab has rows. */
-const TRACKED_ROSTER: readonly ApiTraineeFixture[] = traineeRows(12);
-
 describe('LapRemedialComponent', () => {
   let http: HttpTestingController;
+
+  /** The track state the page's queries are answered from, mutated by moves. */
+  let server: ServerRow[];
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -42,6 +51,7 @@ describe('LapRemedialComponent', () => {
       providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
     }).compileComponents();
     http = TestBed.inject(HttpTestingController);
+    server = trackedServer();
     // Moving trainees needs `lap-remedial.manage`, and an `all`-scope role is
     // what offers Bangalore / Batch 01 / LG Alpha in the filter bar.
     signInWith(http, TestBed.inject(AuthService), SIGN_IN.superadmin);
@@ -87,19 +97,82 @@ describe('LapRemedialComponent', () => {
     fixture.detectChanges();
   }
 
-  /** Selects Bangalore / Batch 01 / LG Alpha and runs the search. */
+  /** The track a row is on, with "none" standing for no open track. */
+  function trackOf(row: ServerRow): string {
+    return row.status ?? 'none';
+  }
+
+  /** The rows a query selects, as the API would select them. */
+  function matchingRows(params: URLSearchParams): ServerRow[] {
+    const status = params.get('status');
+    const search = (params.get('search') ?? '').toLowerCase();
+    return server.filter(
+      (row) =>
+        (status === null || trackOf(row) === status) &&
+        (search === '' ||
+          row.name.toLowerCase().includes(search) ||
+          row.employeeId.toLowerCase().includes(search)),
+    );
+  }
+
+  /**
+   * Answers the pending roster request from {@link server}, asserting the track
+   * it asked for when one is given.
+   */
+  function flushTraineesRequest(
+    fixture: ReturnType<typeof createFixture>,
+    expectedStatus?: string,
+  ): URLSearchParams {
+    const request = http.expectOne(
+      (candidate) => candidate.url === `${API_BASE}/assessments/trainees`,
+    );
+    const params = new URLSearchParams(request.request.params.toString());
+    if (expectedStatus !== undefined) {
+      expect(params.get('status')).toBe(expectedStatus);
+    }
+    const page = Number(params.get('page') ?? '0');
+    const size = Number(params.get('size') ?? '25');
+    const rows = matchingRows(params);
+    request.flush(
+      pageOf(rows.slice(page * size, page * size + size), {
+        page,
+        size,
+        totalElements: rows.length,
+      }),
+    );
+    fixture.detectChanges();
+    return params;
+  }
+
+  /** Applies a confirmed move to the simulated server. */
+  function applyMove(
+    employeeId: string,
+    change: { status: string; remark: string; startDate?: string; closeDate?: string },
+  ): void {
+    const row = server.find((candidate) => candidate.employeeId === employeeId);
+    if (!row) {
+      return;
+    }
+    row.status = change.status === 'none' ? undefined : change.status;
+    row.remark = change.remark;
+    if (change.status === 'none') {
+      row.startDate = undefined;
+    } else {
+      row.startDate = change.startDate;
+    }
+  }
+
+  /** Selects Bangalore / Batch 01 / LG Alpha and searches the tab on screen. */
   async function searchBangalore(
     fixture: ReturnType<typeof createFixture>,
-    rows: readonly ApiTraineeFixture[] = UNTRACKED_ROSTER,
+    status = 'none',
   ): Promise<void> {
     await chooseFilter(fixture, 0, 'Bangalore');
     await chooseFilter(fixture, 1, 'Batch 01');
     await chooseFilter(fixture, 2, 'LG Alpha');
     searchButton(fixture).click();
     fixture.detectChanges();
-    // The roster only arrives from `GET /api/assessments/trainees`.
-    flushTrainees(http, rows, (params) => params.get('lgId') === '1004');
-    fixture.detectChanges();
+    flushTraineesRequest(fixture, status);
   }
 
   /** The track tab button with the given label. */
@@ -111,6 +184,13 @@ describe('LapRemedialComponent', () => {
       throw new Error(`No track tab labelled "${label}"`);
     }
     return button;
+  }
+
+  /** Opens a tab and answers the query it makes for that track. */
+  function openTab(fixture: ReturnType<typeof createFixture>, label: string, status: string): void {
+    tabButton(fixture, label).click();
+    fixture.detectChanges();
+    flushTraineesRequest(fixture, status);
   }
 
   /** Employee ids of the rows on screen. */
@@ -127,7 +207,7 @@ describe('LapRemedialComponent', () => {
     );
   }
 
-  /** Confirms the open track-change dialog with the given remark. */
+  /** Confirms the open track-change dialog with the given remark, then reloads the tab. */
   function confirmDialog(fixture: ReturnType<typeof createFixture>, remark: string): void {
     const element = host(fixture);
     const textarea = element.querySelector<HTMLTextAreaElement>(
@@ -140,15 +220,20 @@ describe('LapRemedialComponent', () => {
     (element.querySelector<HTMLButtonElement>('.btn-primary') as HTMLButtonElement).click();
     fixture.detectChanges();
 
-    // The move is a PATCH; the page re-reads the service's cache once it settles.
     const request = http.expectOne(
       (candidate) =>
         candidate.method === 'PATCH' &&
         candidate.url.startsWith(`${API_BASE}/assessments/trainees/`) &&
         candidate.url.endsWith('/lap-remedial'),
     );
+    const parts = request.request.url.split('/');
+    const employeeId = parts[parts.length - 2];
+    applyMove(employeeId, request.request.body as { status: string; remark: string });
     request.flush(null, { status: 204, statusText: 'No Content' });
     fixture.detectChanges();
+
+    // The trainee has left the tab, so the tab is read again from the server.
+    flushTraineesRequest(fixture);
   }
 
   /** Sets the start date of the open track-change dialog. */
@@ -160,10 +245,7 @@ describe('LapRemedialComponent', () => {
   }
 
   /** Moves the first trainee on screen onto the next track; returns their id. */
-  async function moveFirstTrainee(
-    fixture: ReturnType<typeof createFixture>,
-    remark: string,
-  ): Promise<string> {
+  function moveFirstTrainee(fixture: ReturnType<typeof createFixture>, remark: string): string {
     const employeeId = rowIds(fixture)[0];
     host(fixture).querySelector<HTMLButtonElement>('.row-action-text')?.click();
     fixture.detectChanges();
@@ -194,9 +276,9 @@ describe('LapRemedialComponent', () => {
     expect(search.querySelector('.filter-search-icon')).not.toBeNull();
   });
 
-  it('offers the three track tabs once a group is searched', async () => {
+  it('searches the tab on screen as its own server query and switches tabs by track', async () => {
     const fixture = createFixture();
-    await searchBangalore(fixture, TRACKED_ROSTER);
+    await searchBangalore(fixture);
 
     const tabs = Array.from(host(fixture).querySelectorAll<HTMLButtonElement>('.track-tab'));
     expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
@@ -206,9 +288,8 @@ describe('LapRemedialComponent', () => {
     ]);
     expect(tabs[0].getAttribute('aria-selected')).toBe('true');
     expect(tabs[1].getAttribute('aria-selected')).toBe('false');
-    expect(host(fixture).querySelector('app-assessment-table')).not.toBeNull();
 
-    // Each tab holds the slice of the roster that is on its track.
+    // The server answers the No LAP / Remedial tab with the ten untracked rows.
     expect(rowIds(fixture)).toEqual([
       '41203',
       '41204',
@@ -222,15 +303,13 @@ describe('LapRemedialComponent', () => {
       '41212',
     ]);
 
-    tabButton(fixture, 'Remedial').click();
-    fixture.detectChanges();
+    openTab(fixture, 'Remedial', 'remedial');
     expect(rowIds(fixture)).toEqual(['41202']);
     expect(host(fixture).querySelector('tbody tr .td-remark')?.textContent?.trim()).toBe(
       'Below threshold.',
     );
 
-    tabButton(fixture, 'LAP').click();
-    fixture.detectChanges();
+    openTab(fixture, 'LAP', 'lap');
     expect(rowIds(fixture)).toEqual(['41201']);
     expect(host(fixture).querySelector('tbody tr .td-remark')?.textContent?.trim()).toBe(
       'No improvement.',
@@ -259,11 +338,11 @@ describe('LapRemedialComponent', () => {
   });
 
   it('hints when a tab holds no trainees', async () => {
+    server = untrackedServer();
     const fixture = createFixture();
     await searchBangalore(fixture);
 
-    tabButton(fixture, 'Remedial').click();
-    fixture.detectChanges();
+    openTab(fixture, 'Remedial', 'remedial');
 
     expect(host(fixture).querySelector('app-assessment-table')).toBeNull();
     expect(host(fixture).querySelector('.empty-state')?.textContent?.trim()).toBe(
@@ -272,6 +351,7 @@ describe('LapRemedialComponent', () => {
   });
 
   it('moves a trainee to Remedial after confirming with a remark', async () => {
+    server = untrackedServer();
     const fixture = createFixture();
     await searchBangalore(fixture);
 
@@ -290,8 +370,7 @@ describe('LapRemedialComponent', () => {
     expect(rowIds(fixture)).not.toContain(employeeId);
     expect(toastMessages()).toContain('Moved to Remedial');
 
-    tabButton(fixture, 'Remedial').click();
-    fixture.detectChanges();
+    openTab(fixture, 'Remedial', 'remedial');
 
     expect(rowIds(fixture)).toContain(employeeId);
     expect(headerLabels(fixture)).toEqual([
@@ -314,6 +393,7 @@ describe('LapRemedialComponent', () => {
   });
 
   it('records a chosen start date and shows it in the track table', async () => {
+    server = untrackedServer();
     const fixture = createFixture();
     await searchBangalore(fixture);
 
@@ -328,8 +408,7 @@ describe('LapRemedialComponent', () => {
     setDialogDate(fixture, '2026-03-04');
     confirmDialog(fixture, 'Weak pre-assessment score');
 
-    tabButton(fixture, 'Remedial').click();
-    fixture.detectChanges();
+    openTab(fixture, 'Remedial', 'remedial');
 
     expect(host(fixture).querySelector('tbody tr .td-start-date')?.textContent?.trim()).toBe(
       '4 Mar 2026',
@@ -337,12 +416,12 @@ describe('LapRemedialComponent', () => {
   });
 
   it('offers Move to LAP on the Remedial tab', async () => {
+    server = untrackedServer();
     const fixture = createFixture();
     await searchBangalore(fixture);
-    await moveFirstTrainee(fixture, 'Needs support');
+    moveFirstTrainee(fixture, 'Needs support');
 
-    tabButton(fixture, 'Remedial').click();
-    fixture.detectChanges();
+    openTab(fixture, 'Remedial', 'remedial');
 
     const actions = Array.from(
       host(fixture).querySelectorAll<HTMLButtonElement>('.row-action-text'),
@@ -351,12 +430,12 @@ describe('LapRemedialComponent', () => {
   });
 
   it('carries the remark given when moving from Remedial to LAP', async () => {
+    server = untrackedServer();
     const fixture = createFixture();
     await searchBangalore(fixture);
-    await moveFirstTrainee(fixture, 'Needs support');
+    moveFirstTrainee(fixture, 'Needs support');
 
-    tabButton(fixture, 'Remedial').click();
-    fixture.detectChanges();
+    openTab(fixture, 'Remedial', 'remedial');
 
     host(fixture).querySelector<HTMLButtonElement>('.row-action-text')?.click();
     fixture.detectChanges();
@@ -371,8 +450,7 @@ describe('LapRemedialComponent', () => {
     );
     expect(toastMessages()).toContain('Moved to LAP');
 
-    tabButton(fixture, 'LAP').click();
-    fixture.detectChanges();
+    openTab(fixture, 'LAP', 'lap');
 
     // …and arrived on LAP with the remark given at the move.
     const actions = Array.from(
@@ -389,32 +467,31 @@ describe('LapRemedialComponent', () => {
   });
 
   it('closes a LAP track and returns the trainee to No LAP / Remedial', async () => {
+    server = untrackedServer();
     const fixture = createFixture();
     await searchBangalore(fixture);
-    const employeeId = await moveFirstTrainee(fixture, 'Needs support');
+    const employeeId = moveFirstTrainee(fixture, 'Needs support');
 
-    tabButton(fixture, 'Remedial').click();
-    fixture.detectChanges();
+    openTab(fixture, 'Remedial', 'remedial');
     host(fixture).querySelector<HTMLButtonElement>('.row-action-text')?.click();
     fixture.detectChanges();
     confirmDialog(fixture, 'Completed remedial support');
 
-    tabButton(fixture, 'LAP').click();
-    fixture.detectChanges();
+    openTab(fixture, 'LAP', 'lap');
 
     host(fixture).querySelector<HTMLButtonElement>('.row-action-text')?.click();
     fixture.detectChanges();
     expect(host(fixture).querySelector('.modal-title')?.textContent?.trim()).toBe('Close LAP');
     confirmDialog(fixture, 'Track completed');
 
-    tabButton(fixture, 'No LAP / Remedial').click();
-    fixture.detectChanges();
+    openTab(fixture, 'No LAP / Remedial', 'none');
 
     expect(rowIds(fixture)).toContain(employeeId);
     expect(toastMessages()).toContain('Removed from LAP / Remedial');
   });
 
   it('keeps the trainee on their tab when the dialog is cancelled', async () => {
+    server = untrackedServer();
     const fixture = createFixture();
     await searchBangalore(fixture);
     const employeeId = rowIds(fixture)[0];
@@ -432,6 +509,7 @@ describe('LapRemedialComponent', () => {
     host(fixture).querySelector<HTMLButtonElement>('.btn-secondary')?.click();
     fixture.detectChanges();
 
+    http.expectNone((candidate) => candidate.method === 'PATCH');
     expect(host(fixture).querySelector('[role="dialog"]')).toBeNull();
     expect(rowIds(fixture)[0]).toBe(employeeId);
   });

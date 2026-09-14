@@ -1,4 +1,12 @@
-import { Component, computed, inject, input, output, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  computed,
+  inject,
+  input,
+  linkedSignal,
+  output,
+} from '@angular/core';
 import {
   ColumnDef,
   Header,
@@ -33,13 +41,18 @@ import {
   cefrBadge,
   formatIsoDate,
 } from '../../../core/models/assessment.model';
+import { DEFAULT_PAGE_SIZE, SortDirection } from '../../../core/models/page.model';
 import { CefrMappingService } from '../../../core/services/cefr-mapping.service';
 import { SelectComponent, SelectOption } from '../select/select';
 
 /**
  * Registered TanStack Table features — only what the assessments grid needs, so
  * the bundle carries no unused row models: core rows/columns/headers, sorting
- * and client-side pagination.
+ * and pagination.
+ *
+ * The grid is server-driven, so both are in manual mode: the rows the server
+ * sent are shown as they arrived, and the pager's arithmetic is taken from the
+ * total the server reported rather than from the page on screen.
  */
 const features = tableFeatures({
   rowPaginationFeature,
@@ -51,8 +64,8 @@ const features = tableFeatures({
 
 type AssessmentTableFeatures = typeof features;
 
-/** Rows per page until the user picks another size in the table footer. */
-const DEFAULT_PAGE_SIZE = 10;
+/** How long typing settles before the search is sent to the server. */
+const SEARCH_DEBOUNCE_MS = 300;
 
 /**
  * Sort sentinel for an exam a trainee has not taken. Keeping a number here lets
@@ -64,19 +77,32 @@ const PENDING_SCORE = -1;
 /** Builds the column definitions: identity, one column per configured exam, start date, remark, actions. */
 function createColumns(
   exams: readonly AssessmentExam[],
-  options: { showStartDate: boolean; showRemark: boolean; showActions: boolean },
+  options: {
+    showStartDate: boolean;
+    showRemark: boolean;
+    showActions: boolean;
+    sortableColumns: readonly string[];
+  },
 ): ColumnDef<AssessmentTableFeatures, TraineeAssessment>[] {
+  // Only the columns the host can actually order by offer a sort control. A
+  // header that looks sortable but silently does nothing is worse than one that
+  // does not: the user clicks it, sees the arrow change, and concludes the data
+  // is ordered when it is not.
+  const isSortable = (id: string) => options.sortableColumns.includes(id);
+
   const identityColumns: ColumnDef<AssessmentTableFeatures, TraineeAssessment>[] = [
     {
       id: 'employeeId',
       accessorKey: 'employeeId',
       header: 'Emp ID',
+      enableSorting: isSortable('employeeId'),
       sortFn: 'alphanumeric',
     },
     {
       id: 'name',
       accessorKey: 'name',
       header: 'Name',
+      enableSorting: isSortable('name'),
       sortFn: 'alphanumeric',
     },
   ];
@@ -87,6 +113,8 @@ function createColumns(
     id: exam.id,
     header: exam.name,
     accessorFn: (row) => row.results[exam.id]?.score ?? PENDING_SCORE,
+    // Off unless a host says the server can order by this exam.
+    enableSorting: isSortable(exam.id),
     sortFn: 'basic',
   }));
 
@@ -131,17 +159,38 @@ export interface AssessmentRowActionEvent {
   trainee: TraineeAssessment;
 }
 
+/** A page the footer asked for: where to go, and how large a page is. */
+export interface AssessmentPageChange {
+  pageIndex: number;
+  pageSize: number;
+}
+
+/**
+ * A sort a header asked for. `sort` is the table's own column id, which the
+ * host maps onto the key the API sorts by: only the host knows which columns
+ * the server can order.
+ */
+export interface AssessmentSortChange {
+  sort: string;
+  direction: SortDirection;
+}
+
 /** One rendered pagination entry: a page number or an ellipsis gap. */
 type PageItem = { kind: 'page'; key: string; index: number } | { kind: 'gap'; key: string };
 
 /**
- * Assessment table — a paginated, sortable grid of trainee results.
+ * Assessment table — a server-paged, server-sorted grid of trainee results.
  *
- * TanStack Table owns the row model (sorting and pagination); the markup lives
- * here so the score/CEFR cells and the configured exam columns stay in Angular
- * templates. Adding or removing an exam in the configuration changes the
- * columns without touching this component, and the action cells render
- * whatever row actions the host page passes in.
+ * The page owns what is on screen: the rows it passes in are already the
+ * current page and already in the requested order, so this component never
+ * slices, filters or reorders them. Its search box, pager and headers report
+ * what the user asked for and wait for the host to bring the answer back,
+ * because a client that filtered or sorted a single page would report "no
+ * matches" for a trainee sitting on another one.
+ *
+ * TanStack still owns the columns and the header sort indicators; the markup
+ * lives here so the score/CEFR cells and the configured exam columns stay in
+ * Angular templates.
  */
 @Component({
   selector: 'app-assessment-table',
@@ -167,8 +216,9 @@ type PageItem = { kind: 'page'; key: string; index: number } | { kind: 'gap'; ke
 export class AssessmentTableComponent {
   /** The configured mapping, so each CEFR badge uses its level's colour. */
   private readonly cefrMapping = inject(CefrMappingService);
+  private readonly destroyRef = inject(DestroyRef);
 
-  /** Trainee rows of the searched group. */
+  /** The current page of trainee rows, as the server returned them. */
   readonly data = input.required<readonly TraineeAssessment[]>();
 
   /** Configured exams — rendered as one column each (Pre / Mid / Post today). */
@@ -183,49 +233,64 @@ export class AssessmentTableComponent {
   /** Whether rows show the remark they arrived with (LAP / Remedial tracks). */
   readonly showRemark = input(false);
 
+  /** Zero-based index of the page on screen. */
+  readonly pageIndex = input(0);
+
+  /** Rows per page. */
+  readonly pageSize = input(DEFAULT_PAGE_SIZE);
+
+  /** Rows matching the current query across every page — never the page's length. */
+  readonly totalElements = input(0);
+
+  /** Whether a page is in flight, so the grid can say so and hold its controls. */
+  readonly loading = input(false);
+
+  /** The search the rows were loaded for; `''` when none is applied. */
+  readonly searchQuery = input('');
+
+  /**
+   * Column ids the host can order by server-side.
+   *
+   * <p>Defaults to the two identity columns, which both the results and the LAP /
+   * Remedial screens support. Exam columns are absent because the API has no sort
+   * key for a per-exam score, so they are not offered rather than offered and
+   * ignored.
+   */
+  readonly sortableColumns = input<readonly string[]>(['employeeId', 'name']);
+
   /** Emitted when a row action is triggered. */
   readonly action = output<AssessmentRowActionEvent>();
 
-  /** What the user has typed into the search box. */
-  readonly query = signal('');
+  /** Emitted when the footer asks for another page, or another page size. */
+  readonly pageChange = output<AssessmentPageChange>();
+
+  /** Emitted when the search should run, debounced so typing is one request. */
+  readonly searchChange = output<string>();
+
+  /** Emitted when a header asks for a new order. */
+  readonly sortChange = output<AssessmentSortChange>();
 
   /**
-   * Rows matching the current search.
-   *
-   * Matching is case-insensitive and substring-based against the name or the
-   * employee id, because those are the two things a user has in front of them
-   * when they are hunting for one person in a long roster — they will type
-   * either "aarav" or "41207" without thinking about which column it lives in.
-   * The search runs over the rows already loaded for the selected group, so it
-   * is instant and needs no round trip.
+   * What the search box shows. Follows {@link searchQuery} when the host
+   * applies a search, but leads it while the user is still typing — otherwise
+   * an in-flight page for an earlier term would overwrite what was typed since.
    */
-  private readonly filteredData = computed<readonly TraineeAssessment[]>(() => {
-    const query = this.query().trim().toLowerCase();
-    if (query === '') {
-      return this.data();
-    }
-    return this.data().filter(
-      (trainee) =>
-        trainee.name.toLowerCase().includes(query) ||
-        trainee.employeeId.toLowerCase().includes(query),
-    );
-  });
+  protected readonly draftQuery = linkedSignal(() => this.searchQuery());
 
-  /** Whether a search term is currently narrowing the grid. */
-  readonly isSearching = computed(() => this.query().trim() !== '');
+  /** Whether an applied search is narrowing the grid. */
+  readonly isSearching = computed(() => this.searchQuery().trim() !== '');
 
   /**
-   * Whether the selection has trainees but none of them match the search. Kept
-   * apart from "the selection is empty", which is the host page's empty state.
+   * Whether a search found nothing. Under server paging that is simply an empty
+   * page while a search is applied, which is kept apart from "the selection is
+   * empty" — the host page's own empty state.
    */
-  readonly hasNoMatches = computed(
-    () => this.isSearching() && this.data().length > 0 && this.filteredData().length === 0,
-  );
+  readonly hasNoMatches = computed(() => this.isSearching() && this.totalElements() === 0);
 
   /** Page-size choices offered in the table footer. */
   readonly pageSizeOptions: SelectOption[] = [
     { value: '10', label: '10 / page' },
-    { value: '25', label: '25 / page' },
+    { value: String(DEFAULT_PAGE_SIZE), label: `${DEFAULT_PAGE_SIZE} / page` },
     { value: '50', label: '50 / page' },
   ];
 
@@ -234,27 +299,37 @@ export class AssessmentTableComponent {
       showStartDate: this.showStartDate(),
       showRemark: this.showRemark(),
       showActions: this.actions().length > 0,
+      sortableColumns: this.sortableColumns(),
     }),
   );
 
   /**
-   * The table instance. `autoResetPageIndex` is off because a page keeps its
-   * position when a row is edited; {@link resetPage} runs after each search.
+   * The table instance. Pagination and sorting are manual: the server has
+   * already cut the page and ordered it, so the table must not do either again.
+   * `rowCount` is the server total, which is what the pager's maths needs, and
+   * the page index and size are the host's, passed straight through.
    */
   readonly table = injectTable(() => ({
     features,
     columns: this.columns(),
-    data: this.filteredData(),
+    data: this.data(),
     getRowId: (row) => row.employeeId,
-    initialState: { pagination: { pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE } },
+    manualPagination: true,
+    manualSorting: true,
+    rowCount: this.totalElements(),
+    state: { pagination: { pageIndex: this.pageIndex(), pageSize: this.pageSize() } },
     autoResetPageIndex: false,
     enableSortingRemoval: false,
   }));
 
-  private readonly pagination = computed(() => this.table.atoms.pagination.get());
-
   /** Zero-based index of the page on screen. */
-  readonly currentPage = computed(() => this.pagination().pageIndex);
+  readonly currentPage = computed(() => this.pageIndex());
+
+  /** Number of pages the server total divides into. */
+  readonly pageCount = computed(() => {
+    const size = this.pageSize();
+    return size > 0 ? Math.ceil(this.totalElements() / size) : 0;
+  });
 
   /** Headers of the grid (a single header row — no column groups). */
   readonly headerGroups = computed<HeaderGroup<AssessmentTableFeatures, TraineeAssessment>[]>(() =>
@@ -268,15 +343,24 @@ export class AssessmentTableComponent {
   readonly columnCount = computed(() => this.headerGroups()[0]?.headers.length ?? 0);
 
   /** Currently selected page size, as required by the footer select. */
-  readonly pageSizeValue = computed(() => String(this.pagination().pageSize));
+  readonly pageSizeValue = computed(() => String(this.pageSize()));
+
+  /** Whether the pager can step back. */
+  readonly canPreviousPage = computed(() => this.pageIndex() > 0);
+
+  /** Whether the pager can step forward. */
+  readonly canNextPage = computed(
+    () => this.pageCount() > 0 && this.pageIndex() < this.pageCount() - 1,
+  );
 
   /** e.g. "Showing 11–20 of 57 trainees". */
   readonly pageSummary = computed(() => {
-    const total = this.table.getRowCount();
+    const total = this.totalElements();
     if (total === 0) {
       return 'No trainees';
     }
-    const { pageIndex, pageSize } = this.pagination();
+    const pageIndex = this.pageIndex();
+    const pageSize = this.pageSize();
     const first = pageIndex * pageSize + 1;
     const last = Math.min(total, first + pageSize - 1);
     return `Showing ${first}–${last} of ${total} trainees`;
@@ -284,8 +368,8 @@ export class AssessmentTableComponent {
 
   /** Page numbers to render, windowed around the current page with gaps. */
   readonly pageItems = computed<PageItem[]>(() => {
-    const pageCount = this.table.getPageCount();
-    const current = this.pagination().pageIndex;
+    const pageCount = this.pageCount();
+    const current = this.pageIndex();
     const candidates = [0, current - 1, current, current + 1, pageCount - 1];
     const visible = Array.from(new Set(candidates))
       .filter((index) => index >= 0 && index < pageCount)
@@ -303,50 +387,59 @@ export class AssessmentTableComponent {
     return items;
   });
 
-  /** Returns the grid to the first page — called after each new search. */
+  private searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor() {
+    this.destroyRef.onDestroy(() => clearTimeout(this.searchTimer));
+  }
+
+  /** Returns the grid to the first page — called when what is on screen is replaced. */
   resetPage(): void {
-    this.table.setPageIndex(0);
+    this.requestPage(0);
   }
 
   /**
    * Applies a new search term.
    *
-   * The grid is returned to its first page because the filtered set is usually
-   * shorter: staying on page 4 of a result that now has one page would show an
-   * empty grid and read as "nothing found".
+   * Emitting is delayed until typing settles: a request per keystroke would
+   * spend most of its answers on prefixes nobody asked to see, and the last one
+   * to arrive would not necessarily be the last one typed.
    */
   onSearchInput(event: Event): void {
-    this.query.set((event.target as HTMLInputElement).value);
-    this.resetPage();
+    const value = (event.target as HTMLInputElement).value;
+    this.draftQuery.set(value);
+    clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => this.searchChange.emit(value), SEARCH_DEBOUNCE_MS);
   }
 
   /** Shows every trainee of the selection again. */
   clearSearch(): void {
-    if (!this.isSearching()) {
-      return;
-    }
-    this.query.set('');
-    this.resetPage();
+    clearTimeout(this.searchTimer);
+    this.draftQuery.set('');
+    this.searchChange.emit('');
   }
 
   goToPage(index: number): void {
-    this.table.setPageIndex(index);
+    this.requestPage(index);
   }
 
   previousPage(): void {
-    this.table.previousPage();
+    this.requestPage(Math.max(0, this.currentPage() - 1));
   }
 
   nextPage(): void {
-    this.table.nextPage();
+    this.requestPage(this.currentPage() + 1);
   }
 
   goToFirstPage(): void {
-    this.table.firstPage();
+    this.requestPage(0);
   }
 
   goToLastPage(): void {
-    this.table.lastPage();
+    const last = this.pageCount() - 1;
+    if (last >= 0) {
+      this.requestPage(last);
+    }
   }
 
   onPageSizeChange(value: string | undefined): void {
@@ -354,14 +447,21 @@ export class AssessmentTableComponent {
     if (!Number.isInteger(pageSize) || pageSize <= 0) {
       return;
     }
-    this.table.setPageSize(pageSize);
-    this.resetPage();
+    // A bigger page holds rows that used to be on later pages, so the current
+    // index may no longer exist; the host is asked for the first page instead.
+    this.requestPage(0, pageSize);
   }
 
-  /** Toggles the sort of a column, then returns the grid to its first page. */
+  /**
+   * Reports the order a header asks for. The rows are not reordered here: under
+   * manual sorting they are the server's page and stay as it sent them.
+   */
   onSort(header: Header<AssessmentTableFeatures, TraineeAssessment>, event: Event): void {
     header.column.getToggleSortingHandler()?.(event);
-    this.resetPage();
+    const direction = header.column.getIsSorted();
+    if (direction === 'asc' || direction === 'desc') {
+      this.sortChange.emit({ sort: header.column.id, direction });
+    }
   }
 
   /** Forwards a triggered row action to the page that configured it. */
@@ -420,5 +520,10 @@ export class AssessmentTableComponent {
       return `${name}, sorted descending. Activate to sort ascending.`;
     }
     return `Sort by ${name} ascending.`;
+  }
+
+  /** Reports a requested page, keeping the size unless the footer changed it. */
+  private requestPage(pageIndex: number, pageSize = this.pageSize()): void {
+    this.pageChange.emit({ pageIndex, pageSize });
   }
 }

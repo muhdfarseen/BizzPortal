@@ -1,5 +1,7 @@
 package com.bizzskill.portal.user.web;
 
+import com.bizzskill.portal.common.web.PageQuery;
+import com.bizzskill.portal.common.web.PageResponse;
 import com.bizzskill.portal.security.CurrentUser;
 import com.bizzskill.portal.user.dto.CreatedUserResponse;
 import com.bizzskill.portal.user.dto.PermissionResponse;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -44,9 +47,22 @@ public class UserController {
         this.currentUser = currentUser;
     }
 
+    /**
+     * One page of portal accounts.
+     *
+     * <p>{@code search}, {@code role} and {@code status} are applied in the database
+     * with the page, so they filter the whole table rather than the page on screen.
+     */
     @GetMapping
-    public List<PortalUserResponse> list() {
-        return users.list();
+    public PageResponse<PortalUserResponse> list(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String role,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String direction) {
+        return users.list(PageQuery.of(page, size, search), role, status, sort, direction);
     }
 
     /**

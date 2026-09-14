@@ -44,7 +44,7 @@
       </p>
     </div>
   } @else {
-    <div class="table-card">
+    <div class="table-card" [attr.aria-busy]="loading()" [class.is-loading]="loading()">
       <!-- ── Toolbar: search + role / status filters ────────── -->
       <div class="table-toolbar">
         <div class="search-field">
@@ -54,7 +54,7 @@
             class="search-input"
             placeholder="Search by name, employee ID or email"
             aria-label="Search users"
-            [value]="search()"
+            [value]="draftSearch()"
             (input)="onSearchInput($event)"
           />
           @if (search()) {
@@ -88,7 +88,7 @@
         </div>
       </div>
 
-      @if (filteredUsers().length) {
+      @if (rows().length) {
         <!-- ── Grid ──────────────────────────────────────────── -->
         <div class="table-scroll">
           <table class="user-table" aria-label="Portal users">
@@ -196,7 +196,7 @@
               <button
                 type="button"
                 class="pagination-btn"
-                [disabled]="!table.getCanPreviousPage()"
+                [disabled]="loading() || !canPreviousPage()"
                 aria-label="First page"
                 (click)="goToFirstPage()"
               >
@@ -205,7 +205,7 @@
               <button
                 type="button"
                 class="pagination-btn"
-                [disabled]="!table.getCanPreviousPage()"
+                [disabled]="loading() || !canPreviousPage()"
                 aria-label="Previous page"
                 (click)="previousPage()"
               >
@@ -232,7 +232,7 @@
               <button
                 type="button"
                 class="pagination-btn"
-                [disabled]="!table.getCanNextPage()"
+                [disabled]="loading() || !canNextPage()"
                 aria-label="Next page"
                 (click)="nextPage()"
               >
@@ -241,7 +241,7 @@
               <button
                 type="button"
                 class="pagination-btn"
-                [disabled]="!table.getCanNextPage()"
+                [disabled]="loading() || !canNextPage()"
                 aria-label="Last page"
                 (click)="goToLastPage()"
               >
@@ -271,7 +271,6 @@
 @if (isDialogOpen()) {
   <app-user-edit-dialog
     [user]="editingUser()"
-    [takenEmployeeIds]="takenEmployeeIds()"
     [lockRole]="isEditingSelf()"
     (save)="onDialogSave($event)"
     (cancelled)="closeDialog()"
@@ -280,45 +279,19 @@
 
 <!-- ── Delete confirmation ───────────────────────────────────── -->
 @if (pendingDelete(); as user) {
-  <div class="modal-backdrop" (click)="cancelDelete()">
-    <div
-      class="modal-dialog"
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="delete-user-title"
-      (click)="$event.stopPropagation()"
-    >
-      <header class="modal-header">
-        <div class="modal-title-area">
-          <span class="modal-icon-badge" aria-hidden="true">
-            <ng-icon name="reiconTrash" size="20" />
-          </span>
-          <div>
-            <h2 id="delete-user-title" class="modal-title">Delete user</h2>
-            <p class="modal-subtitle">{{ user.name }} &bull; {{ user.employeeId }}</p>
-          </div>
-        </div>
-        <button
-          type="button"
-          class="modal-close-btn"
-          aria-label="Close dialog"
-          (click)="cancelDelete()"
-        >
-          <ng-icon name="reiconCloseCircle" size="20" />
-        </button>
-      </header>
-
-      <div class="modal-body">
-        <p class="modal-message">
-          {{ user.name }} ({{ user.employeeId }}) loses access to {{ accessSummary(user) }}. This
-          cannot be undone.
-        </p>
-      </div>
-
-      <footer class="modal-footer">
-        <button type="button" class="btn-secondary" (click)="cancelDelete()">Cancel</button>
-        <button type="button" class="btn-danger" (click)="confirmDelete()">Delete user</button>
-      </footer>
-    </div>
-  </div>
+  <app-confirm-dialog
+    title="Delete user"
+    [subtitle]="user.name + ' • ' + user.employeeId"
+    [message]="
+      user.name +
+      ' (' +
+      user.employeeId +
+      ') loses access to ' +
+      accessSummary(user) +
+      '. This cannot be undone.'
+    "
+    confirmLabel="Delete user"
+    (confirmed)="confirmDelete()"
+    (cancelled)="cancelDelete()"
+  />
 }

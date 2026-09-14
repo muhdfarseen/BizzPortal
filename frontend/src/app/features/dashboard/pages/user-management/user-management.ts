@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, linkedSignal, signal } from '@angular/core';
 import {
   ColumnDef,
   Header,
@@ -33,16 +33,18 @@ import {
   accessSummary,
   roleLabel,
 } from '../../../../core/models/user.model';
+import { DEFAULT_PAGE_SIZE, FIRST_PAGE, SortDirection } from '../../../../core/models/page.model';
 import { apiErrorMessage } from '../../../../core/http/api-error';
 import { AuthService } from '../../../../core/services/auth.service';
 import { UserService } from '../../../../core/services/user.service';
 import { ToastService } from '../../../../core/ui/toast.service';
 import { SelectComponent, SelectOption } from '../../../../shared/ui/select/select';
 import { UserEditDialogComponent } from '../../../../shared/ui/user-edit-dialog/user-edit-dialog';
+import { ConfirmDialogComponent } from '../../../../shared/ui/confirm-dialog/confirm-dialog';
 
 /**
  * Registered TanStack Table features — the same set the assessments grid uses:
- * core rows/columns/headers, sorting and client-side pagination.
+ * core rows/columns/headers, sorting and pagination, both driven by the server.
  */
 const features = tableFeatures({
   rowPaginationFeature,
@@ -54,10 +56,16 @@ const features = tableFeatures({
 
 type UserTableFeatures = typeof features;
 
-/** Rows per page until the user picks another size in the table footer. */
-const DEFAULT_PAGE_SIZE = 10;
+/** How long typing settles before the search is sent to the server. */
+const SEARCH_DEBOUNCE_MS = 300;
 
-/** Columns of the user grid. */
+/**
+ * Columns of the user grid.
+ *
+ * Only the three fields the API can order are sortable. The role, access and
+ * status columns stay plain labels: offering a sort that the server cannot
+ * honour would reorder nothing and still look like it had worked.
+ */
 const COLUMNS: ColumnDef<UserTableFeatures, PortalUser>[] = [
   { id: 'employeeId', accessorKey: 'employeeId', header: 'Employee ID', sortFn: 'alphanumeric' },
   { id: 'name', accessorKey: 'name', header: 'Name', sortFn: 'alphanumeric' },
@@ -66,7 +74,7 @@ const COLUMNS: ColumnDef<UserTableFeatures, PortalUser>[] = [
     id: 'role',
     header: 'Role',
     accessorFn: (row) => roleLabel(row.role),
-    sortFn: 'alphanumeric',
+    enableSorting: false,
   },
   {
     id: 'access',
@@ -74,9 +82,16 @@ const COLUMNS: ColumnDef<UserTableFeatures, PortalUser>[] = [
     accessorFn: (row) => accessSummary(row),
     enableSorting: false,
   },
-  { id: 'status', accessorKey: 'status', header: 'Status', sortFn: 'alphanumeric' },
+  { id: 'status', accessorKey: 'status', header: 'Status', enableSorting: false },
   { id: 'actions', header: 'Actions', enableSorting: false },
 ];
+
+/** The table's column ids, mapped onto the keys the API sorts by. */
+const SORT_KEYS: Record<string, string> = {
+  employeeId: 'employeeId',
+  name: 'name',
+  email: 'email',
+};
 
 /** One rendered pagination entry: a page number or an ellipsis gap. */
 type PageItem = { kind: 'page'; key: string; index: number } | { kind: 'gap'; key: string };
@@ -92,11 +107,16 @@ const ALL = 'all';
  * permissions apply to. Only a Super Admin reaches this screen (see
  * `permissionGuard` on the route), and nobody can delete their own account or
  * change its role — that would lock the portal's last admin out.
+ *
+ * The list is paged, searched, filtered and sorted by the server. That means an
+ * employee number cannot be checked for uniqueness against the rows on screen —
+ * the account it collides with may be on another page — so the API's own 409 is
+ * what refuses a duplicate.
  */
 @Component({
   selector: 'app-user-management',
   standalone: true,
-  imports: [NgIcon, SelectComponent, UserEditDialogComponent],
+  imports: [NgIcon, SelectComponent, UserEditDialogComponent, ConfirmDialogComponent],
   providers: [
     provideIcons({
       reiconAnglesLeft,
@@ -127,10 +147,16 @@ export class UserManagementComponent {
   private readonly users = inject(UserService);
   private readonly toasts = inject(ToastService);
   private readonly auth = inject(AuthService);
+  private readonly destroyRef = inject(DestroyRef);
 
   /* ── Toolbar state ───────────────────────────────────────── */
 
+  /** The search the rows were loaded for; `''` when none is applied. */
   readonly search = signal('');
+
+  /** What the search box shows, leading {@link search} while the user types. */
+  protected readonly draftSearch = linkedSignal(() => this.search());
+
   readonly roleFilter = signal(ALL);
   readonly statusFilter = signal(ALL);
 
@@ -155,46 +181,58 @@ export class UserManagementComponent {
   /** Page-size choices offered in the table footer. */
   readonly pageSizeOptions: SelectOption[] = [
     { value: '10', label: '10 / page' },
-    { value: '25', label: '25 / page' },
+    { value: String(DEFAULT_PAGE_SIZE), label: `${DEFAULT_PAGE_SIZE} / page` },
     { value: '50', label: '50 / page' },
   ];
 
+  /* ── Paging state ────────────────────────────────────────── */
+
+  /** The current page of accounts, exactly as the server returned it. */
+  private readonly pageUsers = signal<readonly PortalUser[]>([]);
+
+  /** Rows matching the search and filters across every page — never the page's length. */
+  readonly totalElements = signal(0);
+
+  /** Whether a page is in flight. */
+  readonly loading = signal(false);
+
+  /** Whether the first page has been read, so the empty state does not flash. */
+  readonly loaded = signal(false);
+
+  readonly pageIndex = signal(FIRST_PAGE);
+  readonly pageSize = signal(DEFAULT_PAGE_SIZE);
+
+  /** Sort the rows were loaded in; omitted means the API's own order. */
+  private readonly sort = signal<string | undefined>(undefined);
+  private readonly direction = signal<SortDirection | undefined>(undefined);
+
+  private searchTimer: ReturnType<typeof setTimeout> | undefined;
+
   constructor() {
-    // The roster, the role matrix and the permission list all come from the API.
+    // The role matrix and permission list come from the API; the accounts are a
+    // paged read the toolbar drives.
     this.users.loadAll().subscribe({
       error: (error: unknown) => this.errorMessage.set(apiErrorMessage(error)),
     });
+    this.load();
+    this.destroyRef.onDestroy(() => clearTimeout(this.searchTimer));
   }
 
-  /** Accounts matching the search text and the role / status filters. */
-  readonly filteredUsers = computed<PortalUser[]>(() => {
-    const term = this.search().trim().toLowerCase();
-    const role = this.roleFilter();
-    const status = this.statusFilter();
+  /** Whether the toolbar is narrowing the roster at all. */
+  private readonly isFiltered = computed(
+    () => this.search().trim() !== '' || this.roleFilter() !== ALL || this.statusFilter() !== ALL,
+  );
 
-    return this.users.users().filter((user) => {
-      if (role !== ALL && user.role !== role) {
-        return false;
-      }
-      if (status !== ALL && user.status !== status) {
-        return false;
-      }
-      if (!term) {
-        return true;
-      }
-      return (
-        user.name.toLowerCase().includes(term) ||
-        user.employeeId.toLowerCase().includes(term) ||
-        user.email.toLowerCase().includes(term)
-      );
-    });
-  });
-
-  /** Whether any account exists at all, as opposed to none matching the filters. */
-  readonly hasUsers = computed(() => this.users.users().length > 0);
-
-  /** Employee ids already in use — the dialog rejects a duplicate. */
-  readonly takenEmployeeIds = computed(() => this.users.users().map((user) => user.employeeId));
+  /**
+   * Whether any account exists at all, as opposed to none matching the filters.
+   *
+   * With the roster paged, only an unfiltered empty page proves there are no
+   * accounts; an empty page under a filter or search says nothing beyond "none
+   * matched", so the two states stay apart.
+   */
+  readonly hasUsers = computed(
+    () => this.totalElements() > 0 || this.isFiltered() || !this.loaded(),
+  );
 
   /* ── Dialog state ────────────────────────────────────────── */
 
@@ -221,17 +259,24 @@ export class UserManagementComponent {
   readonly table = injectTable(() => ({
     features,
     columns: COLUMNS,
-    data: this.filteredUsers(),
+    data: this.pageUsers(),
     getRowId: (row) => row.employeeId,
-    initialState: { pagination: { pageIndex: 0, pageSize: DEFAULT_PAGE_SIZE } },
+    manualPagination: true,
+    manualSorting: true,
+    rowCount: this.totalElements(),
+    state: { pagination: { pageIndex: this.pageIndex(), pageSize: this.pageSize() } },
     autoResetPageIndex: false,
     enableSortingRemoval: false,
   }));
 
-  private readonly pagination = computed(() => this.table.atoms.pagination.get());
-
   /** Zero-based index of the page on screen. */
-  readonly currentPage = computed(() => this.pagination().pageIndex);
+  readonly currentPage = computed(() => this.pageIndex());
+
+  /** Number of pages the server total divides into. */
+  readonly pageCount = computed(() => {
+    const size = this.pageSize();
+    return size > 0 ? Math.ceil(this.totalElements() / size) : 0;
+  });
 
   /** Headers of the grid (a single header row — no column groups). */
   readonly headers = computed(() => this.table.getHeaderGroups()[0]?.headers ?? []);
@@ -243,15 +288,24 @@ export class UserManagementComponent {
   readonly columnCount = computed(() => this.headers().length);
 
   /** Currently selected page size, as required by the footer select. */
-  readonly pageSizeValue = computed(() => String(this.pagination().pageSize));
+  readonly pageSizeValue = computed(() => String(this.pageSize()));
+
+  /** Whether the pager can step back. */
+  readonly canPreviousPage = computed(() => this.pageIndex() > 0);
+
+  /** Whether the pager can step forward. */
+  readonly canNextPage = computed(
+    () => this.pageCount() > 0 && this.pageIndex() < this.pageCount() - 1,
+  );
 
   /** e.g. "Showing 11–20 of 57 users". */
   readonly pageSummary = computed(() => {
-    const total = this.table.getRowCount();
+    const total = this.totalElements();
     if (total === 0) {
       return 'No users';
     }
-    const { pageIndex, pageSize } = this.pagination();
+    const pageIndex = this.pageIndex();
+    const pageSize = this.pageSize();
     const first = pageIndex * pageSize + 1;
     const last = Math.min(total, first + pageSize - 1);
     return `Showing ${first}–${last} of ${total} ${total === 1 ? 'user' : 'users'}`;
@@ -259,8 +313,8 @@ export class UserManagementComponent {
 
   /** Page numbers to render, windowed around the current page with gaps. */
   readonly pageItems = computed<PageItem[]>(() => {
-    const pageCount = this.table.getPageCount();
-    const current = this.pagination().pageIndex;
+    const pageCount = this.pageCount();
+    const current = this.pageIndex();
     const candidates = [0, current - 1, current, current + 1, pageCount - 1];
     const visible = Array.from(new Set(candidates))
       .filter((index) => index >= 0 && index < pageCount)
@@ -278,27 +332,75 @@ export class UserManagementComponent {
     return items;
   });
 
+  /* ── Loading ─────────────────────────────────────────────── */
+
+  /** Reads the page the toolbar and pager are pointing at. */
+  private load(): void {
+    this.loading.set(true);
+    this.users
+      .load({
+        page: this.pageIndex(),
+        size: this.pageSize(),
+        search: this.search(),
+        role: this.roleFilter() === ALL ? undefined : this.roleFilter(),
+        status: this.statusFilter() === ALL ? undefined : this.statusFilter(),
+        sort: this.sort(),
+        direction: this.direction(),
+      })
+      .subscribe({
+        next: (page) => {
+          this.pageUsers.set(page.items);
+          this.totalElements.set(page.totalElements);
+          this.loading.set(false);
+          this.loaded.set(true);
+        },
+        error: (error: unknown) => {
+          this.pageUsers.set([]);
+          this.totalElements.set(0);
+          this.loading.set(false);
+          this.loaded.set(true);
+          this.errorMessage.set(apiErrorMessage(error));
+        },
+      });
+  }
+
   /* ── Toolbar actions ─────────────────────────────────────── */
 
+  /**
+   * Delays the search until typing settles: a request per keystroke would spend
+   * most of its answers on prefixes nobody asked to see.
+   */
   onSearchInput(event: Event): void {
-    this.search.set((event.target as HTMLInputElement).value);
-    this.resetPage();
+    const value = (event.target as HTMLInputElement).value;
+    this.draftSearch.set(value);
+    clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => {
+      this.search.set(value);
+      // A narrower roster usually has fewer pages, so start again from the top.
+      this.pageIndex.set(FIRST_PAGE);
+      this.load();
+    }, SEARCH_DEBOUNCE_MS);
   }
 
   onRoleFilterChange(value: string | undefined): void {
     this.roleFilter.set(value || ALL);
-    this.resetPage();
+    this.pageIndex.set(FIRST_PAGE);
+    this.load();
   }
 
   onStatusFilterChange(value: string | undefined): void {
     this.statusFilter.set(value || ALL);
-    this.resetPage();
+    this.pageIndex.set(FIRST_PAGE);
+    this.load();
   }
 
   /** Empties the search field, showing every account the filters allow again. */
   clearSearch(): void {
+    clearTimeout(this.searchTimer);
+    this.draftSearch.set('');
     this.search.set('');
-    this.resetPage();
+    this.pageIndex.set(FIRST_PAGE);
+    this.load();
   }
 
   /* ── Row helpers ─────────────────────────────────────────── */
@@ -353,6 +455,7 @@ export class UserManagementComponent {
           next: () => {
             this.toasts.success('Account updated');
             this.closeDialog();
+            this.load();
           },
           // Kept inline as well: the banner stays on screen while the user fixes
           // the field, where the toast would have already faded.
@@ -369,8 +472,13 @@ export class UserManagementComponent {
           this.temporaryPassword.set(created.temporaryPassword);
           this.toasts.success('Account created');
           this.closeDialog();
+          // A new account is not necessarily on the page on screen, so the
+          // roster is re-read from the top with the toolbar's filters.
+          this.pageIndex.set(FIRST_PAGE);
+          this.load();
         },
         error: (error: unknown) => {
+          // A duplicate employee number arrives here as the API's own 409.
           this.errorMessage.set(apiErrorMessage(error));
           this.closeDialog();
         },
@@ -410,6 +518,7 @@ export class UserManagementComponent {
       next: () => {
         this.toasts.success(`Account for ${user.name} deleted`);
         this.pendingDelete.set(null);
+        this.load();
       },
       error: (error: unknown) => {
         this.errorMessage.set(apiErrorMessage(error));
@@ -431,28 +540,32 @@ export class UserManagementComponent {
 
   /* ── Pagination and sorting ──────────────────────────────── */
 
+  /** Returns the grid to the first page — called when a filter is replaced. */
   resetPage(): void {
-    this.table.setPageIndex(0);
+    this.requestPage(FIRST_PAGE);
   }
 
   goToPage(index: number): void {
-    this.table.setPageIndex(index);
+    this.requestPage(index);
   }
 
   previousPage(): void {
-    this.table.previousPage();
+    this.requestPage(Math.max(0, this.currentPage() - 1));
   }
 
   nextPage(): void {
-    this.table.nextPage();
+    this.requestPage(this.currentPage() + 1);
   }
 
   goToFirstPage(): void {
-    this.table.firstPage();
+    this.requestPage(FIRST_PAGE);
   }
 
   goToLastPage(): void {
-    this.table.lastPage();
+    const last = this.pageCount() - 1;
+    if (last >= 0) {
+      this.requestPage(last);
+    }
   }
 
   onPageSizeChange(value: string | undefined): void {
@@ -460,14 +573,27 @@ export class UserManagementComponent {
     if (!Number.isInteger(pageSize) || pageSize <= 0) {
       return;
     }
-    this.table.setPageSize(pageSize);
-    this.resetPage();
+    this.requestPage(FIRST_PAGE, pageSize);
   }
 
-  /** Toggles the sort of a column, then returns the grid to its first page. */
+  /**
+   * Reports the order a header asks for. The rows are not reordered here: under
+   * manual sorting they are the server's page and stay as it sent them.
+   */
   onSort(header: Header<UserTableFeatures, PortalUser>, event: Event): void {
     header.column.getToggleSortingHandler()?.(event);
-    this.resetPage();
+    const direction = header.column.getIsSorted();
+    const sort = SORT_KEYS[header.column.id];
+    if (!sort || (direction !== 'asc' && direction !== 'desc')) {
+      return;
+    }
+    this.sort.set(sort);
+    this.direction.set(direction);
+    // Ties are broken by the server, so a new order starts at its first page —
+    // and the page is read again even when that is the page already on screen,
+    // because the order on it has just changed.
+    this.pageIndex.set(FIRST_PAGE);
+    this.load();
   }
 
   /** `aria-sort` value of a header cell. */
@@ -499,5 +625,15 @@ export class UserManagementComponent {
       return `${name}, sorted descending. Activate to sort ascending.`;
     }
     return `Sort by ${name} ascending.`;
+  }
+
+  /** Reports a requested page, keeping the size unless the footer changed it. */
+  private requestPage(pageIndex: number, pageSize = this.pageSize()): void {
+    const unchanged = pageIndex === this.pageIndex() && pageSize === this.pageSize();
+    this.pageIndex.set(pageIndex);
+    this.pageSize.set(pageSize);
+    if (!unchanged) {
+      this.load();
+    }
   }
 }

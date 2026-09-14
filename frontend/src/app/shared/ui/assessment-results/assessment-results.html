@@ -18,7 +18,7 @@
   </div>
 
   @if (hasSearched()) {
-    @if (rows().length) {
+    @if (showTable()) {
       <section class="results" aria-label="Assessment results">
         @if (isStale()) {
           <p class="results-notice" role="status">Filters changed — search again to refresh.</p>
@@ -28,7 +28,15 @@
           [data]="rows()"
           [exams]="selectedExams()"
           [actions]="rowActions()"
+          [pageIndex]="pageIndex()"
+          [pageSize]="pageSize()"
+          [totalElements]="totalElements()"
+          [loading]="loading()"
+          [searchQuery]="search()"
           (action)="onRowAction($event)"
+          (pageChange)="onPageChange($event)"
+          (searchChange)="onSearchChange($event)"
+          (sortChange)="onSortChange($event)"
         />
       </section>
     } @else {

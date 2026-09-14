@@ -141,8 +141,7 @@
   margin: 0;
 }
 
-.section-note,
-.section-empty {
+.section-note {
   font-family: var(--font-body);
   font-size: 0.75rem;
   color: var(--color-muted-foreground);
@@ -221,47 +220,7 @@
 }
 
 /* ── Location / batch assignment ───────────────────────────── */
-
-.checkbox-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-  gap: 0.375rem;
-  max-height: 12rem;
-  overflow-y: auto;
-}
-
-.checkbox-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4375rem 0.625rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: #ffffff;
-  font-family: var(--font-body);
-  font-size: 0.8125rem;
-  color: var(--color-card-foreground);
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    background-color 0.15s ease;
-}
-
-.checkbox-item:hover {
-  border-color: var(--color-primary);
-}
-
-.checkbox-item.is-checked {
-  border-color: var(--color-primary);
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-  font-weight: 600;
-}
-
-.checkbox-item input {
-  accent-color: var(--color-primary);
-  cursor: pointer;
-}
+/* The pickers themselves live in `shared/ui/multi-select`.      */
 
 /* ── Permission checklist (read-only) ──────────────────────── */
 

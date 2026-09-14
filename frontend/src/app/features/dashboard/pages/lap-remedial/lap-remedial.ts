@@ -1,16 +1,15 @@
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
-import {
-  LapRemedialStatus,
-  TraineeAssessment,
-  lapRemedialStatus,
-} from '../../../../core/models/assessment.model';
+import { LapRemedialStatus, TraineeAssessment } from '../../../../core/models/assessment.model';
+import { DEFAULT_PAGE_SIZE, FIRST_PAGE, SortDirection } from '../../../../core/models/page.model';
 import { AssessmentService } from '../../../../core/services/assessment.service';
 import { AuthService } from '../../../../core/services/auth.service';
 import { ToastService } from '../../../../core/ui/toast.service';
 import { FilterBarComponent, FilterState } from '../../../../shared/filter-bar/filter-bar';
 import {
+  AssessmentPageChange,
   AssessmentRowAction,
   AssessmentRowActionEvent,
+  AssessmentSortChange,
   AssessmentTableComponent,
 } from '../../../../shared/ui/assessment-table/assessment-table';
 import {
@@ -50,6 +49,16 @@ const EMPTY_TAB_HINTS: Record<LapRemedialStatus, string> = {
 };
 
 /**
+ * The table's column ids, mapped onto the keys the API sorts by. Only these two
+ * can be ordered server-side; a header the map does not name (an exam column,
+ * say) leaves the order alone rather than sorting the page in the browser.
+ */
+const SORT_KEYS: Record<string, string> = {
+  name: 'name',
+  employeeId: 'employeeId',
+};
+
+/**
  * LAP / Remedial page: the filter bar, the track tabs and the trainees of the
  * tab on screen.
  *
@@ -57,6 +66,10 @@ const EMPTY_TAB_HINTS: Record<LapRemedialStatus, string> = {
  * confirmed in a dialog that records a remark. The remark given with a move is
  * what the destination tab's table shows, so each track knows why its trainees
  * arrived.
+ *
+ * Each tab is its own server-paged query: the track is sent as the `status`
+ * filter, so the pager counts the tab rather than the whole group and the page
+ * on screen is never a slice of something larger.
  */
 @Component({
   selector: 'app-lap-remedial',
@@ -93,8 +106,27 @@ export class LapRemedialComponent {
   /** Latest filter selection, which may not have been searched yet. */
   private readonly pendingFilter = signal<FilterState | null>(null);
 
-  /** The trainees of the searched group. */
+  /** The current page of the tab on screen, exactly as the server returned it. */
   readonly rows = signal<readonly TraineeAssessment[]>([]);
+
+  /** Rows of the tab on screen across every page — never the page's length. */
+  readonly totalElements = signal(0);
+
+  /** Whether a page is in flight. */
+  readonly loading = signal(false);
+
+  /** Zero-based index of the page on screen. */
+  readonly pageIndex = signal(FIRST_PAGE);
+
+  /** Rows per page. */
+  readonly pageSize = signal(DEFAULT_PAGE_SIZE);
+
+  /** The search the rows were loaded for. */
+  readonly search = signal('');
+
+  /** Sort the rows were loaded in; omitted means the API's own order. */
+  private readonly sort = signal<string | undefined>(undefined);
+  private readonly direction = signal<SortDirection | undefined>(undefined);
 
   /** The track tab on screen. */
   readonly activeTab = signal<LapRemedialStatus>('none');
@@ -106,6 +138,13 @@ export class LapRemedialComponent {
 
   /** Whether a search has been run — drives the empty state. */
   readonly hasSearched = computed(() => this.searchedFilter() !== null);
+
+  /**
+   * Whether the table is shown rather than the tab's empty hint. An empty page
+   * while a search is applied still shows the grid, so the table can say that
+   * the search found nobody on this tab.
+   */
+  readonly showTable = computed(() => this.totalElements() > 0 || this.search().trim() !== '');
 
   /** Whether the filters moved on after the last search. */
   readonly isStale = computed(() => {
@@ -122,12 +161,6 @@ export class LapRemedialComponent {
     );
   });
 
-  /** The trainees of the tab on screen. */
-  readonly visibleRows = computed(() =>
-    this.rows().filter((trainee) => lapRemedialStatus(trainee) === this.activeTab()),
-  );
-
-  /** Row actions the tab on screen offers on every trainee. */
   /**
    * Row actions of the visible tab: moving a trainee along the track needs
    * `lap-remedial.manage`, so a role without it (Faculty) reads the tabs only.
@@ -153,25 +186,88 @@ export class LapRemedialComponent {
   onSearch(state: FilterState): void {
     this.pendingFilter.set(state);
     this.searchedFilter.set(state);
+    // A new group opens on the first page of the tab on screen. The search term
+    // is kept: it was narrowing the grid the user is still looking at.
+    this.pageIndex.set(FIRST_PAGE);
     this.loadTrainees(state);
     // The table is recreated only by the first search; later searches reuse the
     // instance, so it is returned to its first page here.
     this.resultsTable()?.resetPage();
   }
 
-  /** Reads the group's roster from the API into {@link rows}. */
+  /** Reads one page of the tab on screen into {@link rows}. */
   private loadTrainees(filter: FilterState): void {
-    this.assessments.getTrainees(filter).subscribe({
-      next: (trainees) => this.rows.set(trainees),
-      error: () => this.rows.set([]),
-    });
+    this.loading.set(true);
+    this.assessments
+      .getTrainees(filter, {
+        page: this.pageIndex(),
+        size: this.pageSize(),
+        search: this.search(),
+        status: this.activeTab(),
+        sort: this.sort(),
+        direction: this.direction(),
+      })
+      .subscribe({
+        next: (page) => {
+          this.rows.set(page.items);
+          this.totalElements.set(page.totalElements);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.rows.set([]);
+          this.totalElements.set(0);
+          this.loading.set(false);
+        },
+      });
+  }
+
+  onPageChange(change: AssessmentPageChange): void {
+    const filter = this.searchedFilter();
+    if (!filter) {
+      return;
+    }
+    const unchanged = change.pageIndex === this.pageIndex() && change.pageSize === this.pageSize();
+    this.pageIndex.set(change.pageIndex);
+    this.pageSize.set(change.pageSize);
+    if (!unchanged) {
+      this.loadTrainees(filter);
+    }
+  }
+
+  onSearchChange(term: string): void {
+    const filter = this.searchedFilter();
+    this.search.set(term);
+    if (!filter) {
+      return;
+    }
+    this.pageIndex.set(FIRST_PAGE);
+    this.loadTrainees(filter);
+  }
+
+  onSortChange(change: AssessmentSortChange): void {
+    const filter = this.searchedFilter();
+    const sort = SORT_KEYS[change.sort];
+    if (!filter || !sort) {
+      return;
+    }
+    this.sort.set(sort);
+    this.direction.set(change.direction);
+    this.pageIndex.set(FIRST_PAGE);
+    this.loadTrainees(filter);
   }
 
   selectTab(status: LapRemedialStatus): void {
+    if (status === this.activeTab()) {
+      return;
+    }
     this.activeTab.set(status);
-    // Tabs hold different slices of the group, so a page deep into one tab may
-    // not exist in the next.
-    this.resultsTable()?.resetPage();
+    // Tabs are counted separately by the server, so a page deep into one tab
+    // may not exist in the next.
+    this.pageIndex.set(FIRST_PAGE);
+    const filter = this.searchedFilter();
+    if (filter) {
+      this.loadTrainees(filter);
+    }
   }
 
   onAction(event: AssessmentRowActionEvent): void {
@@ -182,13 +278,12 @@ export class LapRemedialComponent {
     this.confirming.set({ trainee: event.trainee, status, title: event.action.label });
   }
 
-  /** Records the confirmed change and refreshes the tabs' data. */
+  /** Records the confirmed change and refreshes the tab's data. */
   onConfirm(change: LapRemedialChange): void {
     const filter = this.searchedFilter();
     if (filter) {
       this.assessments
         .saveLapRemedial(
-          filter,
           change.employeeId,
           change.status,
           change.remark,
@@ -197,12 +292,12 @@ export class LapRemedialComponent {
         )
         .subscribe({
           next: () => {
-            // The service folds the new track into its cached roster.
-            this.rows.set(this.assessments.cachedTrainees(filter));
             this.toasts.success(LapRemedialComponent.outcomeFor(change.status));
             this.closeDialog();
-            // The trainee has left the tab on screen, so the current page may now
-            // be short or empty.
+            // The trainee has left the tab on screen, so its first page is read
+            // again rather than patched: the row no longer belongs to it.
+            this.pageIndex.set(FIRST_PAGE);
+            this.loadTrainees(filter);
             this.resultsTable()?.resetPage();
           },
           // Reported by the error interceptor; the dialog stays open to retry.

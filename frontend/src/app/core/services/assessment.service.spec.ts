@@ -5,18 +5,21 @@ import {
   AssessmentFilter,
   DEFAULT_MAX_SCORE,
   DEFAULT_MIN_SCORE,
+  TraineeAssessment,
   cefrFromScore,
   clampScore,
   formatIsoDate,
   isValidScore,
   todayIsoDate,
 } from '../models/assessment.model';
+import { Page } from '../models/page.model';
 import { AssessmentService } from './assessment.service';
 import {
   API_BASE,
   ApiTraineeFixture,
   flushStartup,
   flushTrainees,
+  pageOf,
   traineeRows,
 } from '../../testing/api-testing';
 
@@ -47,12 +50,12 @@ describe('AssessmentService', () => {
 
   afterEach(() => http.verify());
 
-  /** Loads a roster for {@link FILTER} and returns it. */
-  function loadRoster(rows: readonly ApiTraineeFixture[] = traineeRows(3)) {
-    let result: readonly unknown[] = [];
-    service.getTrainees(FILTER).subscribe((trainees) => (result = trainees));
+  /** Loads a page for {@link FILTER} and returns it. */
+  function loadPage(rows: readonly ApiTraineeFixture[] = traineeRows(3)): Page<TraineeAssessment> {
+    let result: Page<TraineeAssessment> | undefined;
+    service.getTrainees(FILTER).subscribe((page) => (result = page));
     flushTrainees(http, rows, matchesFilter);
-    return result;
+    return result as Page<TraineeAssessment>;
   }
 
   it('loads the scoreable exams from the configuration endpoint', () => {
@@ -65,9 +68,18 @@ describe('AssessmentService', () => {
     expect(service.exams().every((exam) => exam.maxScore === DEFAULT_MAX_SCORE)).toBe(true);
   });
 
-  it('reads a group roster with the location, batch and LG as query parameters', () => {
-    let received: readonly { employeeId: string }[] = [];
-    service.getTrainees(FILTER).subscribe((trainees) => (received = trainees));
+  it('reads a page with the group, paging, search and order as query parameters', () => {
+    let received: Page<TraineeAssessment> | undefined;
+    service
+      .getTrainees(FILTER, {
+        page: 2,
+        size: 25,
+        search: '  aarav  ',
+        status: 'remedial',
+        sort: 'name',
+        direction: 'desc',
+      })
+      .subscribe((page) => (received = page));
 
     const request = http.expectOne(
       (candidate) => candidate.url === `${API_BASE}/assessments/trainees`,
@@ -76,17 +88,45 @@ describe('AssessmentService', () => {
     expect(request.request.params.get('locationId')).toBe('BLR');
     expect(request.request.params.get('batchId')).toBe('103');
     expect(request.request.params.get('lgId')).toBe('1004');
+    expect(request.request.params.get('page')).toBe('2');
+    expect(request.request.params.get('size')).toBe('25');
+    expect(request.request.params.get('search')).toBe('aarav');
+    expect(request.request.params.get('status')).toBe('remedial');
+    expect(request.request.params.get('sort')).toBe('name');
+    expect(request.request.params.get('direction')).toBe('desc');
 
-    request.flush([
-      { employeeId: '41201', name: 'Aarav Nair', results: { '1': { score: 34, cefr: 'A2' } } },
-      { employeeId: '41202', name: 'Meera Iyer', results: {}, status: 'remedial' },
-    ]);
+    const rows = traineeRows(25);
+    request.flush({
+      items: rows,
+      page: 2,
+      size: 25,
+      totalElements: 60,
+      totalPages: 3,
+      hasNext: true,
+    });
 
-    expect(received.map((trainee) => trainee.employeeId)).toEqual(['41201', '41202']);
+    expect(received?.items.map((trainee) => trainee.employeeId)).toEqual(
+      rows.map((trainee) => trainee.employeeId),
+    );
+    expect(received?.totalElements).toBe(60);
   });
 
-  it('omits exams with no score and drops a "none" track status', () => {
-    loadRoster([
+  it('leaves out a blank search and an unset order', () => {
+    service.getTrainees(FILTER, { page: 0, size: 10, search: '   ' }).subscribe();
+
+    const request = http.expectOne(
+      (candidate) => candidate.url === `${API_BASE}/assessments/trainees`,
+    );
+    expect(request.request.params.get('size')).toBe('10');
+    expect(request.request.params.has('search')).toBe(false);
+    expect(request.request.params.has('sort')).toBe(false);
+    expect(request.request.params.has('direction')).toBe(false);
+    expect(request.request.params.has('status')).toBe(false);
+    request.flush(pageOf(traineeRows(1), { page: 0, size: 10 }));
+  });
+
+  it('maps the page envelope and omits exams with no score', () => {
+    const page = loadPage([
       {
         employeeId: '41201',
         name: 'Aarav Nair',
@@ -94,25 +134,39 @@ describe('AssessmentService', () => {
       },
     ]);
 
-    const [trainee] = service.cachedTrainees(FILTER);
+    const [trainee] = page.items;
     expect(trainee.results['1']).toEqual({ score: 34, cefr: 'A2' });
     expect(trainee.results['2']).toBeUndefined();
     expect(trainee.status).toBeUndefined();
+    expect(page.page).toBe(0);
+    expect(page.size).toBe(25);
+    expect(page.totalElements).toBe(1);
+    expect(page.hasNext).toBe(false);
   });
 
-  it('caches the loaded roster by filter', () => {
-    const rows = traineeRows(4);
-    loadRoster(rows);
+  it('resolves sheet employee numbers against the group with a lookup', () => {
+    let group: { groupSize: number; trainees: readonly { employeeId: string }[] } | undefined;
+    service.lookupTrainees(FILTER, [41201, 41202, 99999]).subscribe((lookup) => (group = lookup));
 
-    expect(service.cachedTrainees(FILTER).length).toBe(4);
-    expect(service.cachedTrainees({ locationId: 'ZZZ', batchId: null, lgId: null })).toEqual([]);
+    const request = http.expectOne(
+      (candidate) => candidate.url === `${API_BASE}/assessments/trainees/lookup`,
+    );
+    expect(request.request.method).toBe('POST');
+    expect(request.request.params.get('lgId')).toBe('1004');
+    expect(request.request.body).toEqual({ employeeIds: [41201, 41202, 99999] });
+
+    request.flush({
+      groupSize: 12,
+      trainees: [{ employeeId: '41201', name: 'Aarav Nair' }],
+    });
+
+    expect(group?.groupSize).toBe(12);
+    expect(group?.trainees).toEqual([{ employeeId: '41201', name: 'Aarav Nair' }]);
   });
 
   it('ignores unknown exams and writes only scores to the API', () => {
-    loadRoster();
-
     service
-      .saveResults(FILTER, '41201', {
+      .saveResults('41201', {
         '1': { score: 88, cefr: 'C1' },
         '3': { score: 44, cefr: 'A2' },
         nope: { score: 50, cefr: 'B1' },
@@ -124,32 +178,19 @@ describe('AssessmentService', () => {
     // The server derives the CEFR level, so it is never sent.
     expect(request.request.body).toEqual({ results: { '1': { score: 88 }, '3': { score: 44 } } });
     request.flush(null, { status: 204, statusText: 'No Content' });
-
-    const trainee = service.cachedTrainees(FILTER).find((row) => row.employeeId === '41201');
-    expect(trainee?.results['1']?.score).toBe(88);
-    expect(trainee?.results['nope']).toBeUndefined();
   });
 
   it('clears a result when a null score is sent', () => {
-    loadRoster([
-      { employeeId: '41201', name: 'Aarav Nair', results: { '1': { score: 34, cefr: 'A2' } } },
-    ]);
-
-    service.saveResults(FILTER, '41201', { '1': undefined }).subscribe();
+    service.saveResults('41201', { '1': undefined }).subscribe();
 
     const request = http.expectOne(`${API_BASE}/assessments/trainees/41201`);
     expect(request.request.body).toEqual({ results: { '1': { score: null } } });
     request.flush(null, { status: 204, statusText: 'No Content' });
-
-    const trainee = service.cachedTrainees(FILTER).find((row) => row.employeeId === '41201');
-    expect(trainee?.results['1']).toBeUndefined();
   });
 
   it('records a track change with its remark and dates', () => {
-    loadRoster();
-
     service
-      .saveLapRemedial(FILTER, '41201', 'remedial', '  Weak pre-assessment  ', '2026-09-01')
+      .saveLapRemedial('41201', 'remedial', '  Weak pre-assessment  ', '2026-09-01')
       .subscribe();
 
     const request = http.expectOne(`${API_BASE}/assessments/trainees/41201/lap-remedial`);
@@ -160,28 +201,10 @@ describe('AssessmentService', () => {
       startDate: '2026-09-01',
     });
     request.flush(null, { status: 204, statusText: 'No Content' });
-
-    const moved = service.cachedTrainees(FILTER).find((row) => row.employeeId === '41201');
-    expect(moved?.status).toBe('remedial');
-    expect(moved?.remark).toBe('Weak pre-assessment');
-    expect(moved?.startDate).toBe('2026-09-01');
   });
 
-  it('closing a track clears its start date and records the close date', () => {
-    loadRoster([
-      {
-        employeeId: '41201',
-        name: 'Aarav Nair',
-        results: {},
-        status: 'lap',
-        startDate: '2026-03-02',
-        remark: 'No improvement.',
-      },
-    ]);
-
-    service
-      .saveLapRemedial(FILTER, '41201', 'none', 'Track closed', undefined, '2026-11-20')
-      .subscribe();
+  it('closing a track records the close date without a start date', () => {
+    service.saveLapRemedial('41201', 'none', 'Track closed', undefined, '2026-11-20').subscribe();
 
     const request = http.expectOne(`${API_BASE}/assessments/trainees/41201/lap-remedial`);
     expect(request.request.body).toEqual({
@@ -190,11 +213,6 @@ describe('AssessmentService', () => {
       closeDate: '2026-11-20',
     });
     request.flush(null, { status: 204, statusText: 'No Content' });
-
-    const reloaded = service.cachedTrainees(FILTER).find((row) => row.employeeId === '41201');
-    expect(reloaded?.status).toBe('none');
-    expect(reloaded?.startDate).toBeUndefined();
-    expect(reloaded?.closeDate).toBe('2026-11-20');
   });
 
   it('scores a stored level with the configured CEFR mapping', () => {

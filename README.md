@@ -76,8 +76,8 @@ created by `DemoDataLoader` and only exist under the `local` profile.
 ## Tests
 
 ```bash
-cd backend  && mvn test                      # 70 tests
-cd frontend && npm test -- --watch=false     # 302 tests
+cd backend  && mvn test                      # 90 tests
+cd frontend && npm test -- --watch=false     # 358 tests
 ```
 
 The backend suite needs `bizzskill_portal_test` to exist and runs against real
@@ -187,13 +187,31 @@ Both halves are complete and run against each other.
 **Backend** — authentication, the organisation hierarchy, configuration
 (assessments and the CEFR mapping), user management, the dashboard figures, and
 the assessment workflow including score entry, LAP / Remedial tracking and the CSV
-bulk upload, with every score change written to an audit trail. 23 endpoints,
-70 tests.
+bulk upload, with every score change written to an audit trail. 24 endpoints,
+90 tests.
 
-Both the assessment results and the LAP / Remedial tables carry a search box
-over the loaded group, matching a partial name or employee id case-insensitively
-and paginating whatever it finds — typing either "aarav" or "41207" finds the
-same person without a round trip.
+Both the assessment results and the LAP / Remedial tables carry a search box,
+matching a partial name or employee id case-insensitively — typing either
+"aarav" or "41207" finds the same person. Paging, searching, filtering and
+ordering are all done by the database and sent one page at a time, so a group of
+two thousand trainees costs a client the same few kilobytes as a group of ten.
+Filters narrow the whole group rather than the page on screen, which is the
+difference that matters: a client-side filter over one page reports "no matches"
+for a trainee sitting on another.
+
+Destructive actions ask first. Assessments and CEFR levels are removed through
+one shared confirmation dialog (`shared/ui/confirm-dialog`), which is an
+`alertdialog` so the question is announced, defaults to the safe answer, and
+closes on Escape or a backdrop click. The prompt for an assessment says that one
+holding recorded results cannot be deleted, because the API enforces exactly
+that and a warning about the wrong consequence teaches users to ignore warnings.
+
+That advice is actionable: every assessment carries an active/inactive state,
+switched from the assessment's own edit dialog and saved with its name and
+description. Retiring takes an assessment out of the results table without
+touching the results already recorded against it, which is the only option once
+they exist. The list badges a retired assessment and dims it, so the state reads
+at a glance without putting a third control on every card.
 
 Scores are recorded per exam, in any order and one at a time. Exams are sat
 individually, so a trainee holds whatever results they have earned so far and
@@ -205,7 +223,17 @@ configuration, HTTP services for every screen, a bearer-token interceptor that
 ends the session on a 401, an error interceptor that unwraps the API's error
 envelope, route guards for authentication and permissions, and toast
 notifications for every action. No in-memory mock data remains in production
-code. 302 tests.
+code. 358 tests.
+
+Assigning a role's locations and batches is done from two dropdown pickers
+rather than a wall of checkboxes. Locations are a multi-select that keeps its
+trigger to one line by naming two and counting the rest; batches are the same
+with a search box, because the list grows past what is worth scanning and each
+batch is qualified with its location (`Kochi · Batch 01`). Both panels are
+portaled popovers, so they clear the dialog they sit in, flip above the trigger
+when the space below is short, and focus the search box on opening. Their bulk
+actions act on what is on screen, so "Select all" with a search active chooses
+every match and nothing else.
 
 ### Before deploying
 

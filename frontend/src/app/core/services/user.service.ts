@@ -1,8 +1,9 @@
 import { HttpClient } from '@angular/common/http';
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { Observable, forkJoin } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
+import { Page, PagedQuery, pagedParams } from '../models/page.model';
 import {
   ApiPermissionDefinition,
   ApiPortalUser,
@@ -11,7 +12,6 @@ import {
   PortalUser,
   RoleDefinition,
   UserDraft,
-  UserStatus,
   normalizeAssignments,
   setPermissionDefinitions,
   setRoleDefinitions,
@@ -26,14 +26,29 @@ export interface CreatedUser {
 }
 
 /**
+ * The account-list query, which adds the toolbar's role and status narrowing to
+ * the shared paging inputs. Both are optional; omitting one means the same as
+ * the "All" choice on screen.
+ */
+export interface UserQuery extends PagedQuery {
+  /** Role code, e.g. `superadmin`; omit for every role. */
+  role?: string;
+  /** `active` or `inactive`; omit for both. */
+  status?: string;
+}
+
+/**
  * Portal user accounts.
  *
  * Every method is an API call:
  *
- * - {@link users}      ← `GET /api/users`
+ * - {@link load}       ← `GET /api/users`
  * - {@link createUser} → `POST /api/users`
  * - {@link updateUser} → `PATCH /api/users/:employeeId`
  * - {@link deleteUser} → `DELETE /api/users/:employeeId`
+ *
+ * The account list is paged, searched, filtered and sorted by the server, so
+ * nothing here holds a roster: the screen keeps the page it is showing.
  *
  * The role and permission matrices are served too (`/api/users/roles`,
  * `/api/users/permissions`) and published to the shared registries, so User
@@ -44,12 +59,8 @@ export class UserService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiBaseUrl}/users`;
 
-  private readonly _users = signal<readonly PortalUser[]>([]);
   private readonly _roles = signal<readonly RoleDefinition[]>([]);
   private readonly _permissions = signal<readonly PermissionDefinition[]>([]);
-
-  /** Every portal user account. */
-  readonly users = this._users.asReadonly();
 
   /** The roles and what each may do, as served by the API. */
   readonly roles = this._roles.asReadonly();
@@ -57,14 +68,25 @@ export class UserService {
   /** Every permission the portal knows, as served by the API. */
   readonly permissions = this._permissions.asReadonly();
 
-  /** Whether the roster has been loaded at least once. */
-  readonly loaded = computed(() => this._users().length > 0);
+  /**
+   * Reads one page of accounts, with the search and the role / status filters
+   * applied by the server so they narrow the whole roster rather than the page
+   * on screen.
+   */
+  load(query: UserQuery = {}): Observable<Page<PortalUser>> {
+    let params = pagedParams(query);
+    if (query.role) {
+      params = params.set('role', query.role);
+    }
+    if (query.status) {
+      params = params.set('status', query.status);
+    }
 
-  /** Reads the account roster. */
-  load(): Observable<readonly PortalUser[]> {
-    return this.http.get<readonly ApiPortalUser[]>(this.baseUrl).pipe(
-      tap((users) => this._users.set(users.map(toPortalUser))),
-      map(() => this._users()),
+    return this.http.get<Page<ApiPortalUser>>(this.baseUrl, { params }).pipe(
+      map((page) => ({
+        ...page,
+        items: page.items.map(toPortalUser),
+      })),
     );
   }
 
@@ -106,34 +128,23 @@ export class UserService {
     );
   }
 
-  /** Loads the roster, roles and permissions the User Management screen needs. */
-  loadAll(): Observable<void> {
-    return forkJoin([this.load(), this.loadRoles(), this.loadPermissions()]).pipe(
-      map(() => undefined),
-    );
-  }
-
-  /** The account with this employee id, or `undefined` when there is none. */
-  getUser(employeeId: string): PortalUser | undefined {
-    const candidate = employeeId.trim().toLowerCase();
-    return this._users().find((user) => user.employeeId.toLowerCase() === candidate);
-  }
-
   /**
-   * Whether an employee id already belongs to an account. `exceptEmployeeId`
-   * excludes the account being edited from the check.
+   * Loads the role matrix and permission list the User Management screen needs.
+   *
+   * The accounts themselves are not read here: they are a paged query the
+   * screen makes for the filters it is showing, not a roster to keep.
    */
-  isEmployeeIdTaken(employeeId: string, exceptEmployeeId?: string): boolean {
-    const candidate = employeeId.trim().toLowerCase();
-    return this._users().some(
-      (user) => user.employeeId.toLowerCase() === candidate && user.employeeId !== exceptEmployeeId,
-    );
+  loadAll(): Observable<void> {
+    return forkJoin([this.loadRoles(), this.loadPermissions()]).pipe(map(() => undefined));
   }
 
   /**
    * Adds an account. `POST /api/users` answers with the created user and, when
    * the request carried no password, the temporary one the backend generated —
    * which is surfaced to the caller because it can never be read again.
+   *
+   * A duplicate employee number is refused by the API with a 409, so the screen
+   * does not try to predict it from a page of accounts.
    */
   createUser(draft: UserDraft): Observable<CreatedUser> {
     const payload = this.toPayload(draft);
@@ -144,57 +155,29 @@ export class UserService {
           user: toPortalUser(response.user),
           temporaryPassword: response.temporaryPassword ?? null,
         })),
-        tap((created) => this._users.update((users) => upsert(users, created.user))),
       );
   }
 
   /**
    * Applies edits to an account. The employee id is the key, so it is not
-   * editable; the API answers with the updated account, which replaces the row.
+   * editable; the API answers with the updated account.
    */
-  updateUser(
-    employeeId: string,
-    changes: Partial<Omit<UserDraft, 'employeeId'>>,
-  ): Observable<PortalUser> {
-    const existing = this.getUser(employeeId);
-    const merged: UserDraft = {
-      employeeId,
-      name: changes.name ?? existing?.name ?? '',
-      email: changes.email ?? existing?.email ?? '',
-      role: changes.role ?? existing?.role ?? 'faculty',
-      locationIds: changes.locationIds ?? existing?.locationIds ?? [],
-      batchIds: changes.batchIds ?? existing?.batchIds ?? [],
-      status: changes.status ?? existing?.status ?? 'active',
-    };
+  updateUser(employeeId: string, changes: Omit<UserDraft, 'employeeId'>): Observable<PortalUser> {
     const { batchIds, locationIds } = normalizeAssignments(
-      merged.role,
-      merged.locationIds,
-      merged.batchIds,
+      changes.role,
+      changes.locationIds,
+      changes.batchIds,
     );
-    const payload = { ...this.toPayload(merged), locationIds, batchIds };
+    const payload = { ...this.toPayload({ employeeId, ...changes }), locationIds, batchIds };
 
     return this.http
       .patch<ApiPortalUser>(`${this.baseUrl}/${encodeURIComponent(employeeId)}`, payload)
-      .pipe(
-        map(toPortalUser),
-        tap((updated) => this._users.update((users) => upsert(users, updated))),
-      );
+      .pipe(map(toPortalUser));
   }
 
   /** Removes an account. */
   deleteUser(employeeId: string): Observable<void> {
-    return this.http
-      .delete<void>(`${this.baseUrl}/${encodeURIComponent(employeeId)}`)
-      .pipe(
-        tap(() =>
-          this._users.update((users) => users.filter((user) => user.employeeId !== employeeId)),
-        ),
-      );
-  }
-
-  /** Activates or deactivates an account without touching its other fields. */
-  setStatus(employeeId: string, status: UserStatus): Observable<PortalUser> {
-    return this.updateUser(employeeId, { status });
+    return this.http.delete<void>(`${this.baseUrl}/${encodeURIComponent(employeeId)}`);
   }
 
   /** The request body both create and update share. */
@@ -214,13 +197,4 @@ export class UserService {
       status: draft.status,
     };
   }
-}
-
-/** Inserts an account, or replaces the row with the same employee id. */
-function upsert(users: readonly PortalUser[], user: PortalUser): readonly PortalUser[] {
-  const index = users.findIndex((candidate) => candidate.employeeId === user.employeeId);
-  if (index === -1) {
-    return [...users, user];
-  }
-  return users.map((candidate, position) => (position === index ? user : candidate));
 }

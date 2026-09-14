@@ -2,13 +2,15 @@ package com.bizzskill.portal.organization.repository;
 
 import com.bizzskill.portal.organization.entity.Participant;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 /** Read access to the portal-owned {@code participant} table. */
-public interface ParticipantRepository extends JpaRepository<Participant, Long> {
+public interface ParticipantRepository
+        extends JpaRepository<Participant, Long>, JpaSpecificationExecutor<Participant> {
 
     /**
      * The roster of a learning group, which is what every assessment screen

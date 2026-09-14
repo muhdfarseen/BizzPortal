@@ -178,6 +178,242 @@ class PortalApiIntegrationTest {
     }
 
     @Nested
+    @DisplayName("paged lists")
+    class PagedLists {
+
+        @Test
+        @DisplayName("a roster page carries the total, not just the rows")
+        void rosterPageCarriesTheTotal() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=0&size=1")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items.length()").value(1))
+                    // Two trainees are in batch 9001, so the client can draw a pager
+                    // without having been sent both.
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(2))
+                    .andExpect(jsonPath("$.page").value(0))
+                    .andExpect(jsonPath("$.size").value(1))
+                    .andExpect(jsonPath("$.hasNext").value(true));
+        }
+
+        @Test
+        @DisplayName("the last page returns the remainder and says there is no more")
+        void lastPageReturnsTheRemainder() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=1&size=1")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items.length()").value(1))
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.hasNext").value(false));
+        }
+
+        @Test
+        @DisplayName("search narrows the whole group, not just the page")
+        void searchNarrowsTheWholeGroup() throws Exception {
+            // Sized to one row: were the filter applied after the page was chosen,
+            // this would find nothing and report a total of one.
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=0&size=1&search=Meera")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items.length()").value(1))
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.items[0].name").value("Meera Iyer"));
+        }
+
+        @Test
+        @DisplayName("search matches a partial employee number")
+        void searchMatchesPartialEmployeeNumber() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&search=7000")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(2));
+        }
+
+        @Test
+        @DisplayName("search is case-insensitive")
+        void searchIgnoresCase() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&search=aArAv")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.items[0].name").value("Aarav Nair"));
+        }
+
+        @Test
+        @DisplayName("searching for nobody reports an empty page rather than a failure")
+        void searchWithNoMatches() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&search=nobodyhere")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items.length()").value(0))
+                    .andExpect(jsonPath("$.totalElements").value(0))
+                    .andExpect(jsonPath("$.totalPages").value(0))
+                    .andExpect(jsonPath("$.hasNext").value(false));
+        }
+
+        @Test
+        @DisplayName("the requested order is applied across the whole group")
+        void sortIsApplied() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&sort=employeeId&direction=desc")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[0].employeeId").value("70002"))
+                    .andExpect(jsonPath("$.items[1].employeeId").value("70001"));
+        }
+
+        @Test
+        @DisplayName("an unknown sort key is refused instead of reaching the query")
+        void unknownSortKeyIsRefused() throws Exception {
+            // The property it names is real but must never be sortable.
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&sort=txtpassword")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("sort"));
+        }
+
+        @Test
+        @DisplayName("a direction that is not asc or desc is refused")
+        void badDirectionIsRefused() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&sort=name&direction=sideways")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("direction"));
+        }
+
+        @Test
+        @DisplayName("a page larger than the cap is refused")
+        void oversizedPageIsRefused() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&size=100000")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("size"));
+        }
+
+        @Test
+        @DisplayName("a negative page is refused rather than clamped")
+        void negativePageIsRefused() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=-1")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("page"));
+        }
+
+        @Test
+        @DisplayName("the track filter narrows to one tab")
+        void trackFilterNarrowsToATab() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&status=none")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    // Nobody in batch 9001 is on a track yet.
+                    .andExpect(jsonPath("$.totalElements").value(2));
+
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&status=lap")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(0));
+        }
+
+        @Test
+        @DisplayName("an unknown track filter is refused")
+        void unknownTrackFilterIsRefused() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&status=sideways")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("status"));
+        }
+
+        @Test
+        @DisplayName("the lookup answers only about the numbers it was given")
+        void lookupAnswersAboutTheNumbersGiven() throws Exception {
+            mvc.perform(post("/api/assessments/trainees/lookup?batchId=9001")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"employeeIds\": [70001, 99999]}"))
+                    .andExpect(status().isOk())
+                    // The group holds two, however many were asked about...
+                    .andExpect(jsonPath("$.groupSize").value(2))
+                    // ...but only the one that is really in it comes back.
+                    .andExpect(jsonPath("$.trainees.length()").value(1))
+                    .andExpect(jsonPath("$.trainees[0].employeeId").value("70001"))
+                    .andExpect(jsonPath("$.trainees[0].name").value("Aarav Nair"));
+        }
+
+        @Test
+        @DisplayName("the lookup refuses an empty list")
+        void lookupRefusesAnEmptyList() throws Exception {
+            mvc.perform(post("/api/assessments/trainees/lookup?batchId=9001")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"employeeIds\": []}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("employeeIds"));
+        }
+
+        @Test
+        @DisplayName("the lookup refuses a trainee outside the caller's scope")
+        void lookupIsScoped() throws Exception {
+            // 70003 belongs to batch 9002, which faculty cannot see.
+            mvc.perform(post("/api/assessments/trainees/lookup")
+                            .header("Authorization", bearer(facultyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"employeeIds\": [70001, 70003]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.groupSize").value(2))
+                    .andExpect(jsonPath("$.trainees.length()").value(1))
+                    .andExpect(jsonPath("$.trainees[0].employeeId").value("70001"));
+        }
+
+        @Test
+        @DisplayName("accounts page with a total too")
+        void accountsPageWithATotal() throws Exception {
+            mvc.perform(get("/api/users?page=0&size=1")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items.length()").value(1))
+                    .andExpect(jsonPath("$.totalElements").value(org.hamcrest.Matchers.greaterThan(1)))
+                    .andExpect(jsonPath("$.hasNext").value(true));
+        }
+
+        @Test
+        @DisplayName("accounts can be filtered by role and by status")
+        void accountsCanBeFiltered() throws Exception {
+            mvc.perform(get("/api/users?role=faculty").header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[*].role")
+                            .value(org.hamcrest.Matchers.everyItem(
+                                    org.hamcrest.Matchers.is("faculty"))));
+
+            mvc.perform(get("/api/users?status=inactive").header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[*].status")
+                            .value(org.hamcrest.Matchers.everyItem(
+                                    org.hamcrest.Matchers.is("inactive"))));
+        }
+
+        @Test
+        @DisplayName("an account search reaches beyond the first page")
+        void accountSearchReachesBeyondTheFirstPage() throws Exception {
+            mvc.perform(get("/api/users?page=0&size=1&search=fac1@test.local")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items.length()").value(1))
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.items[0].employeeId").value("70009"));
+        }
+
+        @Test
+        @DisplayName("the default page is the first, at the default size")
+        void defaultsApply() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.page").value(0))
+                    .andExpect(jsonPath("$.size").value(25));
+        }
+    }
+
+    @Nested
     @DisplayName("authentication is required")
     class RequiresAuthentication {
 
@@ -251,8 +487,9 @@ class PortalApiIntegrationTest {
         void facultySeeOnlyTheirTrainees() throws Exception {
             mvc.perform(get("/api/assessments/trainees").header("Authorization", bearer(facultyToken)))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.length()").value(2))
-                    .andExpect(jsonPath("$[*].employeeId")
+                    .andExpect(jsonPath("$.items.length()").value(2))
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.items[*].employeeId")
                             .value(org.hamcrest.Matchers.containsInAnyOrder("70001", "70002")));
         }
 

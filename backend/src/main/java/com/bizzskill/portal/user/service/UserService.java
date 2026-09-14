@@ -5,6 +5,9 @@ import com.bizzskill.portal.common.enums.Status;
 import com.bizzskill.portal.common.error.ApiErrorResponse.FieldViolation;
 import com.bizzskill.portal.common.error.BusinessRuleException;
 import com.bizzskill.portal.common.error.ConflictException;
+import com.bizzskill.portal.common.web.PageQuery;
+import com.bizzskill.portal.common.web.PageResponse;
+import com.bizzskill.portal.common.web.SortQuery;
 import com.bizzskill.portal.common.error.NotFoundException;
 import com.bizzskill.portal.common.error.RequestValidationException;
 import com.bizzskill.portal.organization.entity.Batch;
@@ -21,8 +24,11 @@ import com.bizzskill.portal.user.entity.AppUser;
 import com.bizzskill.portal.user.repository.AppPermissionRepository;
 import com.bizzskill.portal.user.repository.AppRoleRepository;
 import com.bizzskill.portal.user.repository.AppUserRepository;
+import com.bizzskill.portal.user.repository.AppUserSpecifications;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +37,10 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.Locale;
 import java.util.Set;
 
@@ -72,6 +82,20 @@ public class UserService {
 
     private static final int TEMPORARY_PASSWORD_LENGTH = 14;
 
+    /**
+     * The order pages are cut from.
+     *
+     * <p>Name first, matching the screen. The employee number breaks ties: two
+     * accounts can share a display name, and a page boundary between equal keys may
+     * otherwise return one twice and the other never.
+     */
+    private static final Sort USER_TIE_BREAKERS =
+            Sort.by(Sort.Order.asc("txtName"), Sort.Order.asc("intEmployeeId"));
+
+    /** Sort keys the account list accepts, mapped to entity properties. */
+    private static final Map<String, String> USER_SORTABLE = Map.of(
+            "name", "txtName", "employeeId", "intEmployeeId", "email", "txtEmail");
+
     private final AppUserRepository users;
     private final AppRoleRepository roles;
     private final AppPermissionRepository permissions;
@@ -96,10 +120,36 @@ public class UserService {
     }
 
     /** Every account, for the User Management screen. */
-    public List<PortalUserResponse> list() {
-        return users.findAllByOrderByTxtNameAsc().stream()
+    public PageResponse<PortalUserResponse> list(
+            PageQuery paging, String roleCode, String status, String sort, String direction) {
+
+        Sort order = SortQuery.resolve(sort, direction, USER_SORTABLE, USER_TIE_BREAKERS);
+
+        Page<AppUser> page = users.findAll(
+                AppUserSpecifications.matching(paging.search(), roleCode, status),
+                paging.toPageRequest(order));
+
+        List<Long> pageIds = page.getContent().stream().map(AppUser::getIntUserId).toList();
+        if (pageIds.isEmpty()) {
+            return PageResponse.of(List.of(), page.getNumber(), page.getSize(), page.getTotalElements());
+        }
+
+        // Second pass, for this page only. The first pass reads nothing but ids, so
+        // the role and the location / batch collections are never touched there —
+        // see the note on the repository method for why they cannot be joined into
+        // the paged query itself.
+        Map<Long, AppUser> loaded = users.findByIntUserIdIn(pageIds).stream()
+                .collect(Collectors.toMap(AppUser::getIntUserId, Function.identity()));
+
+        // Rebuilt in the page's order: `findByIntUserIdIn` makes no ordering promise,
+        // and the rows have to line up with the total the client was given.
+        List<PortalUserResponse> rows = pageIds.stream()
+                .map(loaded::get)
+                .filter(Objects::nonNull)
                 .map(PortalUserResponse::from)
                 .toList();
+
+        return PageResponse.of(rows, page.getNumber(), page.getSize(), page.getTotalElements());
     }
 
     /** The role catalogue, with each role's permissions. */

@@ -1,6 +1,7 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { DEFAULT_CEFR_MAPPING, CefrScoreBand } from '../core/models/assessment.model';
 import { ApiOrganizationTree } from '../core/models/organization.model';
+import { DEFAULT_PAGE_SIZE, Page } from '../core/models/page.model';
 import {
   ApiPermissionDefinition,
   ApiPortalUser,
@@ -113,6 +114,30 @@ export interface ApiTraineeFixture {
   startDate?: string;
   closeDate?: string;
   remark?: string;
+}
+
+/**
+ * Wraps rows in the envelope a paged endpoint answers with.
+ *
+ * The total defaults to the rows given — right for a list that fits on one page
+ * — and can be overridden to say that the rows are one page of something larger.
+ */
+export function pageOf<T>(
+  items: readonly T[],
+  overrides: Partial<Omit<Page<T>, 'items'>> = {},
+): Page<T> {
+  const size = overrides.size ?? DEFAULT_PAGE_SIZE;
+  const page = overrides.page ?? 0;
+  const totalElements = overrides.totalElements ?? items.length;
+  const totalPages = overrides.totalPages ?? (size > 0 ? Math.ceil(totalElements / size) : 0);
+  return {
+    items,
+    page,
+    size,
+    totalElements,
+    totalPages,
+    hasNext: overrides.hasNext ?? page + 1 < totalPages,
+  };
 }
 
 const ALL_PERMISSIONS = [
@@ -375,16 +400,41 @@ export function signInWith(
   return user;
 }
 
-/** Flushes a trainees request matching an exact query, and returns nothing. */
+/**
+ * Flushes a trainees page matching an exact query. `page` overrides the
+ * envelope's metadata, so a spec can say that the rows are one page of a larger
+ * result.
+ */
 export function flushTrainees(
   http: HttpTestingController,
   rows: readonly ApiTraineeFixture[],
   match?: (params: URLSearchParams) => boolean,
+  page: Partial<Omit<Page<ApiTraineeFixture>, 'items'>> = {},
 ): void {
   const request = http.expectOne(
     (candidate) =>
       candidate.url === `${API_BASE}/assessments/trainees` &&
       (!match || match(new URLSearchParams(candidate.params.toString()))),
   );
-  request.flush(rows);
+  request.flush(pageOf(rows, page));
+}
+
+/** One trainee as `POST /api/assessments/trainees/lookup` answers it. */
+export interface ApiTraineeRefFixture {
+  employeeId: string;
+  name: string;
+}
+
+/** Flushes a trainee lookup, whose answer is the group size plus the ids it holds. */
+export function flushTraineeLookup(
+  http: HttpTestingController,
+  lookup: { groupSize: number; trainees: readonly ApiTraineeRefFixture[] },
+  match?: (params: URLSearchParams) => boolean,
+): void {
+  const request = http.expectOne(
+    (candidate) =>
+      candidate.url === `${API_BASE}/assessments/trainees/lookup` &&
+      (!match || match(new URLSearchParams(candidate.params.toString()))),
+  );
+  request.flush(lookup);
 }

@@ -33,9 +33,19 @@
       @if (assessments().length) {
         <div class="card-list">
           @for (assessment of assessments(); track assessment.id) {
-            <div class="assessment-card">
+            <div
+              class="assessment-card"
+              [class.assessment-card--inactive]="assessment.status === 'inactive'"
+            >
               <div class="assessment-info">
-                <h4 class="assessment-name">{{ assessment.name }}</h4>
+                <div class="assessment-title">
+                  <h4 class="assessment-name">{{ assessment.name }}</h4>
+                  <!-- Only the exception is badged; "Active" is the default and
+                       a label on every row would be noise. -->
+                  @if (assessment.status === 'inactive') {
+                    <span class="status-badge">Inactive</span>
+                  }
+                </div>
                 <p class="assessment-desc">
                   {{ assessment.description || 'No description provided.' }}
                 </p>
@@ -47,7 +57,8 @@
                 <button
                   class="action-btn action-btn--danger"
                   title="Delete"
-                  (click)="deleteAssessment(assessment.id)"
+                  [attr.aria-label]="'Delete ' + assessment.name"
+                  (click)="requestDeleteAssessment(assessment)"
                 >
                   <ng-icon name="reiconCloseCircle" size="16" />
                 </button>
@@ -137,8 +148,8 @@
             <button
               class="action-btn action-btn--danger"
               title="Remove level"
-              [attr.aria-label]="'Remove ' + band.level"
-              (click)="removeBand(rowIndex)"
+              [attr.aria-label]="'Remove ' + (band.level || 'this level')"
+              (click)="requestRemoveBand(rowIndex)"
             >
               <ng-icon name="reiconCloseCircle" size="16" />
             </button>
@@ -212,6 +223,38 @@
             (input)="onFormDescriptionInput($event)"
           ></textarea>
         </label>
+
+        <!-- Only when editing: a new assessment always starts active, and
+             offering "create it retired" is a corner case with no use. -->
+        @if (editingAssessment()) {
+          <div class="field">
+            <span class="field-label">Status</span>
+            <label class="switch">
+              <input
+                type="checkbox"
+                role="switch"
+                class="switch-input"
+                [checked]="formStatus() === 'active'"
+                (change)="onStatusChange($event)"
+              />
+              <span class="switch-track" aria-hidden="true">
+                <span class="switch-thumb"></span>
+              </span>
+              <span class="switch-text">
+                <span class="switch-state">{{
+                  formStatus() === 'active' ? 'Active' : 'Inactive'
+                }}</span>
+                <span class="switch-hint">
+                  {{
+                    formStatus() === 'active'
+                      ? 'Scored in the results table.'
+                      : 'Hidden from the results table. Results already recorded are kept.'
+                  }}
+                </span>
+              </span>
+            </label>
+          </div>
+        }
       </div>
 
       <div class="dialog-footer">
@@ -222,4 +265,18 @@
       </div>
     </div>
   </div>
+}
+
+<!-- ── Delete confirmation ────────────────────────────────── -->
+<!-- One dialog for both deletes on this page; which one is pending decides
+     the wording. -->
+@if (confirmCopy(); as copy) {
+  <app-confirm-dialog
+    [title]="copy.title"
+    [subtitle]="copy.subtitle"
+    [message]="copy.message"
+    [confirmLabel]="copy.confirmLabel"
+    (confirmed)="confirmDelete()"
+    (cancelled)="cancelDelete()"
+  />
 }

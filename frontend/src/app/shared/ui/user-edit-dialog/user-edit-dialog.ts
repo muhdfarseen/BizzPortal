@@ -16,6 +16,7 @@ import {
 } from '../../../core/models/user.model';
 import { OrganizationService } from '../../../core/services/organization.service';
 import { UserService } from '../../../core/services/user.service';
+import { MultiSelectComponent, MultiSelectOption } from '../multi-select/multi-select';
 import { SelectComponent, SelectOption } from '../select/select';
 
 /** A permission of the portal, marked with whether the chosen role grants it. */
@@ -24,12 +25,6 @@ interface PermissionRow {
   label: string;
   description: string;
   granted: boolean;
-}
-
-/** A batch the user can be assigned to, labelled with its location. */
-interface BatchChoice {
-  id: string;
-  label: string;
 }
 
 /** Enough of an address to be a plausible mailbox — the API has the last word. */
@@ -47,7 +42,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 @Component({
   selector: 'app-user-edit-dialog',
   standalone: true,
-  imports: [NgIcon, SelectComponent],
+  imports: [NgIcon, MultiSelectComponent, SelectComponent],
   providers: [provideIcons({ reiconCheck, reiconCloseCircle, reiconMinus, reiconUserEdit })],
   host: {
     '(document:keydown.escape)': 'onCancel()',
@@ -61,9 +56,6 @@ export class UserEditDialogComponent {
 
   /** The account being edited, or `null` to add a new one. */
   readonly user = input<PortalUser | null>(null);
-
-  /** Employee ids already in use, so a new account cannot collide with one. */
-  readonly takenEmployeeIds = input<readonly string[]>([]);
 
   /**
    * Whether the role field is locked — set for the signed-in user's own
@@ -91,8 +83,13 @@ export class UserEditDialogComponent {
     { value: 'inactive', label: 'Inactive' },
   ];
 
-  /** Every location the session may assign, as the checkboxes render them. */
-  readonly locations = computed(() => this.organization.locations());
+  /** Every location the session may assign, as the picker lists them. */
+  readonly locationOptions = computed<MultiSelectOption[]>(() =>
+    this.organization.locations().map((location) => ({
+      value: location.id,
+      label: location.name,
+    })),
+  );
 
   /** Fields the user has touched; everything else falls back to the account. */
   private readonly edits = signal<Partial<UserDraft>>({});
@@ -130,14 +127,24 @@ export class UserEditDialogComponent {
   readonly showBatches = computed(() => this.role().requiresBatches);
 
   /** Batches of the selected locations, labelled `Kochi · Batch 01`. */
-  readonly batchChoices = computed<BatchChoice[]>(() => {
+  readonly batchOptions = computed<MultiSelectOption[]>(() => {
     // Depends on the loaded tree, so the choices appear when it does.
     this.organization.locations();
     return batchesForLocations(this.draft().locationIds).map((batch: BatchGroup) => ({
-      id: batch.id,
+      value: batch.id,
       label: qualifiedBatchName(batch.id),
     }));
   });
+
+  /**
+   * What the batch picker says while there is nothing to pick from — a nudge
+   * that names the step that fixes it, wherever the dead end came from.
+   */
+  readonly batchHint = computed(() =>
+    this.draft().locationIds.length
+      ? 'The selected locations have no batches.'
+      : 'Select a location to choose its batches.',
+  );
 
   /** Every permission, marked with whether the chosen role grants it. */
   readonly permissionRows = computed<PermissionRow[]>(() => {
@@ -148,19 +155,18 @@ export class UserEditDialogComponent {
     }));
   });
 
-  /** Validation message for the Employee ID field, or `null` when it is fine. */
+  /**
+   * Validation message for the Employee ID field, or `null` when it is fine.
+   *
+   * Whether the id is already in use is not decided here: the account list is
+   * paged, so this side never holds every id, and the API's 409 is what refuses
+   * a duplicate.
+   */
   readonly employeeIdError = computed<string | null>(() => {
     if (this.isEditing()) {
       return null;
     }
-    const employeeId = this.draft().employeeId.trim();
-    if (!employeeId) {
-      return 'Enter an employee ID';
-    }
-    const taken = this.takenEmployeeIds().some(
-      (candidate) => candidate.toLowerCase() === employeeId.toLowerCase(),
-    );
-    return taken ? 'That employee ID already has an account' : null;
+    return this.draft().employeeId.trim() ? null : 'Enter an employee ID';
   });
 
   /** Validation message for the Name field, or `null` when it is fine. */
@@ -230,41 +236,27 @@ export class UserEditDialogComponent {
     this.patch({ status: value as UserStatus });
   }
 
-  /** Whether a location is currently assigned. */
-  isLocationSelected(locationId: string): boolean {
-    return this.draft().locationIds.includes(locationId);
-  }
-
-  /** Whether a batch is currently assigned. */
-  isBatchSelected(batchId: string): boolean {
-    return this.draft().batchIds.includes(batchId);
+  /**
+   * Applies a new location selection. Dropping a location also drops its
+   * batches, so the batch list never keeps a selection the user can no longer
+   * reach.
+   */
+  onLocationsChange(locationIds: readonly string[]): void {
+    const reachable = new Set(
+      batchesForLocations([...locationIds]).map((batch: BatchGroup) => batch.id),
+    );
+    this.patch({
+      locationIds: [...locationIds],
+      batchIds: this.draft().batchIds.filter((batchId) => reachable.has(batchId)),
+    });
   }
 
   /**
-   * Adds or removes a location. Dropping a location also drops its batches, so
-   * the batch list never keeps a selection the user can no longer reach.
+   * Applies a new batch selection. The picker can only offer the batches of the
+   * chosen locations, so a value outside them cannot arrive here.
    */
-  toggleLocation(locationId: string): void {
-    const current = this.draft();
-    const locationIds = current.locationIds.includes(locationId)
-      ? current.locationIds.filter((id) => id !== locationId)
-      : [...current.locationIds, locationId];
-
-    const reachable = new Set(batchesForLocations(locationIds).map((batch) => batch.id));
-    this.patch({
-      locationIds,
-      batchIds: current.batchIds.filter((batchId) => reachable.has(batchId)),
-    });
-  }
-
-  /** Adds or removes a batch. */
-  toggleBatch(batchId: string): void {
-    const current = this.draft();
-    this.patch({
-      batchIds: current.batchIds.includes(batchId)
-        ? current.batchIds.filter((id) => id !== batchId)
-        : [...current.batchIds, batchId],
-    });
+  onBatchesChange(batchIds: readonly string[]): void {
+    this.patch({ batchIds: [...batchIds] });
   }
 
   onSave(): void {

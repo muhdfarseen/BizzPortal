@@ -1,0 +1,66 @@
+<button
+  type="button"
+  class="multi-select-trigger"
+  [ngpPopoverTrigger]="panel"
+  ngpPopoverTriggerPlacement="bottom-start"
+  [ngpPopoverTriggerDisabled]="disabled()"
+  [attr.aria-label]="ariaLabel() ? ariaLabel() + ': ' + summary() : null"
+  (ngpPopoverTriggerOpenChange)="onOpenChange($event)"
+>
+  <span class="trigger-text" [class.is-placeholder]="!hasSelection()">{{ summary() }}</span>
+  <ng-icon name="reiconChevronDown" size="16" class="trigger-chevron" />
+</button>
+
+<ng-template #panel>
+  <!-- A dialog because the panel holds its own search box, which a listbox may
+       not. The trigger announces it as one through aria-haspopup. -->
+  <div class="multi-select-panel" ngpPopover role="dialog" [attr.aria-label]="ariaLabel()">
+    @if (searchable()) {
+      <div class="panel-search">
+        <ng-icon name="reiconSearchNormal" size="16" class="panel-search-icon" />
+        <input
+          #searchBox
+          type="search"
+          class="panel-search-input"
+          placeholder="Search…"
+          aria-label="Search options"
+          [value]="query()"
+          (input)="onQueryInput($event)"
+        />
+      </div>
+    }
+
+    <div class="panel-list" role="group" [attr.aria-label]="ariaLabel()">
+      <!-- Native checkboxes: each carries its own name and checked state, so
+           nothing here has to be announced by hand. -->
+      @for (option of visibleOptions(); track option.value) {
+        <label class="panel-option" [class.is-checked]="isSelected(option.value)">
+          <input
+            type="checkbox"
+            [checked]="isSelected(option.value)"
+            (change)="toggle(option.value)"
+          />
+          <span class="panel-option-label">{{ option.label }}</span>
+        </label>
+      } @empty {
+        <p class="panel-empty">
+          {{ query().trim() ? 'No matches for “' + query().trim() + '”' : emptyMessage() }}
+        </p>
+      }
+    </div>
+
+    @if (options().length) {
+      <footer class="panel-footer">
+        <span class="panel-count">{{ countLabel() }}</span>
+        <span class="panel-actions">
+          <!-- Both act on the options on screen: with a search active that is
+               every match, so bulk edits stay predictable. -->
+          <button type="button" class="panel-action" (click)="selectAllVisible()">
+            Select all
+          </button>
+          <button type="button" class="panel-action" (click)="clearVisible()">Clear</button>
+        </span>
+      </footer>
+    }
+  </div>
+</ng-template>

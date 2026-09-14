@@ -127,10 +127,15 @@ describe('AssessmentUploadDialogComponent', () => {
     input.dispatchEvent(new Event('change'));
 
     await new Promise((resolve) => setTimeout(resolve, 0));
-    // The preview loads the group's roster before validating the sheet.
+    // The preview resolves the ids the sheet named against the group.
     http
-      .match((request) => request.url === `${API_BASE}/assessments/trainees`)
-      .forEach((request) => request.flush(ROSTER));
+      .match((request) => request.url === `${API_BASE}/assessments/trainees/lookup`)
+      .forEach((request) =>
+        request.flush({
+          groupSize: ROSTER.length,
+          trainees: ROSTER.map(({ employeeId, name }) => ({ employeeId, name })),
+        }),
+      );
     await new Promise((resolve) => setTimeout(resolve, 0));
     fixture.detectChanges();
   }

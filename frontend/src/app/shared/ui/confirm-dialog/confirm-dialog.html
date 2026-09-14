@@ -1,0 +1,45 @@
+<!-- `alertdialog` rather than `dialog`: the user must answer before doing
+     anything else, and a screen reader should say so on open. -->
+<div class="modal-backdrop" (click)="cancelled.emit()">
+  <div
+    class="modal-dialog"
+    role="alertdialog"
+    aria-modal="true"
+    [attr.aria-labelledby]="titleId"
+    (click)="$event.stopPropagation()"
+  >
+    <header class="modal-header">
+      <div class="modal-title-area">
+        <span class="modal-icon-badge" aria-hidden="true">
+          <ng-icon [name]="icon()" size="20" />
+        </span>
+        <div>
+          <h2 [id]="titleId" class="modal-title">{{ title() }}</h2>
+          @if (subtitle()) {
+            <p class="modal-subtitle">{{ subtitle() }}</p>
+          }
+        </div>
+      </div>
+      <button
+        type="button"
+        class="modal-close-btn"
+        aria-label="Close dialog"
+        (click)="cancelled.emit()"
+      >
+        <ng-icon name="reiconCloseCircle" size="20" />
+      </button>
+    </header>
+
+    <div class="modal-body">
+      <p class="modal-message">{{ message() }}</p>
+    </div>
+
+    <footer class="modal-footer">
+      <!-- Cancel first, so the safe choice is the one reached by default. -->
+      <button type="button" class="btn-secondary" (click)="cancelled.emit()">Cancel</button>
+      <button type="button" class="btn-danger" (click)="confirmed.emit()">
+        {{ confirmLabel() }}
+      </button>
+    </footer>
+  </div>
+</div>

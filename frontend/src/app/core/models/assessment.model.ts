@@ -202,9 +202,22 @@ export interface AssessmentFilter {
   lgId: string | null;
 }
 
-/** The trainee's LAP / Remedial track, defaulting to `none`. */
-export function lapRemedialStatus(trainee: TraineeAssessment): LapRemedialStatus {
-  return trainee.status ?? 'none';
+/** One trainee by the two fields a bulk upload judges a sheet against. */
+export interface TraineeRef {
+  employeeId: string;
+  name: string;
+}
+
+/**
+ * The group's answer to a trainee lookup: how large the group is, plus only
+ * those of the requested employee numbers that it actually holds.
+ *
+ * `groupSize` is the count of the whole group, so a sheet can be told how many
+ * trainees it left out without the roster behind it ever being sent.
+ */
+export interface TraineeLookup {
+  groupSize: number;
+  trainees: readonly TraineeRef[];
 }
 
 /** Month abbreviations used by {@link formatIsoDate}. */

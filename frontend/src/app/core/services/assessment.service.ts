@@ -10,7 +10,9 @@ import {
   DEFAULT_MAX_SCORE,
   LapRemedialStatus,
   TraineeAssessment,
+  TraineeLookup,
 } from '../models/assessment.model';
+import { Page, PagedQuery, pagedParams } from '../models/page.model';
 import { CefrMappingService } from './cefr-mapping.service';
 
 /** An assessment as `GET /api/configuration/assessments` returns it. */
@@ -23,6 +25,9 @@ interface ApiAssessment {
   status?: string;
 }
 
+/** Lifecycle state of an assessment: retired, or in use. */
+export type AssessmentStatus = 'active' | 'inactive';
+
 /** An assessment as the Configuration screen edits it. */
 export interface AssessmentConfigEntry {
   id: string;
@@ -30,7 +35,7 @@ export interface AssessmentConfigEntry {
   description: string;
   maxScore: number;
   sortOrder: number;
-  status: string;
+  status: AssessmentStatus;
 }
 
 /** One scored exam on a trainee's row. */
@@ -50,9 +55,26 @@ interface ApiTraineeAssessment {
   remark?: string | null;
 }
 
-/** Cache key of a filter — the same group always maps to the same key. */
-function filterKey(filter: AssessmentFilter): string {
-  return [filter.locationId ?? '*', filter.batchId ?? '*', filter.lgId ?? '*'].join('|');
+/** A trainee as `POST /api/assessments/trainees/lookup` answers it. */
+interface ApiTraineeRef {
+  employeeId: string;
+  name: string;
+}
+
+/** The lookup's envelope, before its ids are normalised to strings. */
+interface ApiTraineeLookup {
+  groupSize: number;
+  trainees: readonly ApiTraineeRef[];
+}
+
+/**
+ * The roster query, which adds the LAP / Remedial tab to the shared paging
+ * inputs: the tab is a server-side filter, so it belongs with `search` rather
+ * than with the group the page is scoped to.
+ */
+export interface TraineeQuery extends PagedQuery {
+  /** Keeps only trainees on this track; omit for every track. */
+  status?: LapRemedialStatus;
 }
 
 /** Adds only the narrowing parameters the filter actually sets. */
@@ -75,12 +97,14 @@ function filterParams(filter: AssessmentFilter): HttpParams {
  *
  * - {@link exams}        ← `GET /api/configuration/assessments/active`
  * - {@link getTrainees}  ← `GET /api/assessments/trainees?locationId=…`
+ * - {@link lookupTrainees} → `POST /api/assessments/trainees/lookup`
  * - {@link saveResults}  → `PATCH /api/assessments/trainees/:employeeId`
  * - {@link saveLapRemedial} → `PATCH /api/assessments/trainees/:employeeId/lap-remedial`
  *
  * The server derives every CEFR level, so a saved score is never sent with one.
- * The most recent roster of each filter is cached, which is what the bulk upload
- * dialog validates its preview against.
+ * Rosters are not cached here: the API pages, searches and sorts them, so a
+ * whole-group copy would be both stale and misleading — the caller keeps the
+ * one page it is showing and re-reads it after a change.
  */
 @Injectable({ providedIn: 'root' })
 export class AssessmentService {
@@ -97,9 +121,6 @@ export class AssessmentService {
 
   /** Every assessment, retired ones included — what Configuration edits. */
   readonly allExams = this._allExams.asReadonly();
-
-  /** Rosters of the filters searched so far, keyed by {@link filterKey}. */
-  private readonly rosters = new Map<string, readonly TraineeAssessment[]>();
 
   constructor() {
     this.loadExams().subscribe({ error: () => undefined });
@@ -165,18 +186,26 @@ export class AssessmentService {
       );
   }
 
-  /** Updates an assessment and refreshes both lists. */
+  /**
+   * Updates an assessment and refreshes both lists.
+   *
+   * `status` is only sent when given: the API reads an omitted status as "leave
+   * it alone", so editing a retired assessment's name does not quietly bring it
+   * back into use.
+   */
   updateExam(
     id: string,
     name: string,
     description: string,
     maxScore: number = DEFAULT_MAX_SCORE,
+    status?: AssessmentStatus,
   ): Observable<readonly AssessmentConfigEntry[]> {
     return this.http
       .put<ApiAssessment>(`${this.baseUrl}/configuration/assessments/${encodeURIComponent(id)}`, {
         name: name.trim(),
         description: description.trim(),
         maxScore,
+        ...(status ? { status } : {}),
       })
       .pipe(
         tap(() => {
@@ -199,21 +228,57 @@ export class AssessmentService {
       );
   }
 
-  /** The trainees of the filtered group, with their per-exam results. */
-  getTrainees(filter: AssessmentFilter): Observable<readonly TraineeAssessment[]> {
+  /**
+   * One page of the filtered group's trainees, with their per-exam results.
+   *
+   * The search, track filter and order are applied by the server alongside the
+   * page, so they narrow the whole group rather than the page on screen.
+   */
+  getTrainees(
+    filter: AssessmentFilter,
+    query: TraineeQuery = {},
+  ): Observable<Page<TraineeAssessment>> {
+    let params = pagedParams(query, filterParams(filter));
+    if (query.status) {
+      params = params.set('status', query.status);
+    }
+
     return this.http
-      .get<readonly ApiTraineeAssessment[]>(`${this.baseUrl}/assessments/trainees`, {
-        params: filterParams(filter),
-      })
+      .get<Page<ApiTraineeAssessment>>(`${this.baseUrl}/assessments/trainees`, { params })
       .pipe(
-        map((trainees) => trainees.map(toTraineeAssessment)),
-        tap((trainees) => this.rosters.set(filterKey(filter), trainees)),
+        map((page) => ({
+          ...page,
+          items: page.items.map(toTraineeAssessment),
+        })),
       );
   }
 
-  /** The roster of a filter as last loaded, or an empty list when it never was. */
-  cachedTrainees(filter: AssessmentFilter): readonly TraineeAssessment[] {
-    return this.rosters.get(filterKey(filter)) ?? [];
+  /**
+   * Resolves employee numbers against one group, for a bulk upload preview.
+   *
+   * A POST because a sheet's worth of numbers would overflow a query string,
+   * and only the requested ids that are in the group come back — the preview
+   * judges a sheet without downloading the roster it was made for.
+   */
+  lookupTrainees(
+    filter: AssessmentFilter,
+    employeeIds: readonly number[],
+  ): Observable<TraineeLookup> {
+    return this.http
+      .post<ApiTraineeLookup>(
+        `${this.baseUrl}/assessments/trainees/lookup`,
+        { employeeIds },
+        { params: filterParams(filter) },
+      )
+      .pipe(
+        map((lookup) => ({
+          groupSize: lookup.groupSize,
+          trainees: lookup.trainees.map((trainee) => ({
+            employeeId: String(trainee.employeeId),
+            name: trainee.name,
+          })),
+        })),
+      );
   }
 
   /**
@@ -222,26 +287,22 @@ export class AssessmentService {
    * `null` clears a result.
    */
   saveResults(
-    filter: AssessmentFilter,
     employeeId: string,
     results: Record<string, AssessmentResult | undefined>,
   ): Observable<void> {
     const known = new Set(this._exams().map((exam) => exam.id));
     const payload: Record<string, { score: number | null }> = {};
-    const saved: Record<string, AssessmentResult | undefined> = {};
     for (const [examId, result] of Object.entries(results)) {
       if (!known.has(examId)) {
         continue;
       }
       payload[examId] = { score: result ? result.score : null };
-      saved[examId] = result;
     }
 
-    return this.http
-      .patch<void>(`${this.baseUrl}/assessments/trainees/${encodeURIComponent(employeeId)}`, {
-        results: payload,
-      })
-      .pipe(tap(() => this.applyLocalResults(filter, employeeId, saved)));
+    return this.http.patch<void>(
+      `${this.baseUrl}/assessments/trainees/${encodeURIComponent(employeeId)}`,
+      { results: payload },
+    );
   }
 
   /**
@@ -249,7 +310,6 @@ export class AssessmentService {
    * closes the open track.
    */
   saveLapRemedial(
-    filter: AssessmentFilter,
     employeeId: string,
     status: LapRemedialStatus,
     remark: string,
@@ -264,68 +324,10 @@ export class AssessmentService {
       body['closeDate'] = closeDate;
     }
 
-    return this.http
-      .patch<void>(
-        `${this.baseUrl}/assessments/trainees/${encodeURIComponent(employeeId)}/lap-remedial`,
-        body,
-      )
-      .pipe(
-        tap(() => this.applyLocalTrack(filter, employeeId, status, remark, startDate, closeDate)),
-      );
-  }
-
-  /** Merges a saved score into the cached roster so the table updates at once. */
-  private applyLocalResults(
-    filter: AssessmentFilter,
-    employeeId: string,
-    results: Record<string, AssessmentResult | undefined>,
-  ): void {
-    const roster = this.rosters.get(filterKey(filter));
-    if (!roster) {
-      return;
-    }
-    const next = roster.map((trainee) => {
-      if (trainee.employeeId !== employeeId) {
-        return trainee;
-      }
-      const merged = { ...trainee.results };
-      for (const [examId, result] of Object.entries(results)) {
-        if (result) {
-          merged[examId] = { score: result.score, cefr: this.cefrMapping.levelFor(result.score) };
-        } else {
-          delete merged[examId];
-        }
-      }
-      return { ...trainee, results: merged };
-    });
-    this.rosters.set(filterKey(filter), next);
-  }
-
-  /** Applies a track change to the cached roster. */
-  private applyLocalTrack(
-    filter: AssessmentFilter,
-    employeeId: string,
-    status: LapRemedialStatus,
-    remark: string,
-    startDate?: string,
-    closeDate?: string,
-  ): void {
-    const roster = this.rosters.get(filterKey(filter));
-    if (!roster) {
-      return;
-    }
-    const next = roster.map((trainee) =>
-      trainee.employeeId === employeeId
-        ? {
-            ...trainee,
-            status,
-            remark: remark.trim(),
-            startDate: status === 'none' ? undefined : startDate,
-            closeDate: status === 'none' ? closeDate : undefined,
-          }
-        : trainee,
+    return this.http.patch<void>(
+      `${this.baseUrl}/assessments/trainees/${encodeURIComponent(employeeId)}/lap-remedial`,
+      body,
     );
-    this.rosters.set(filterKey(filter), next);
   }
 }
 
@@ -337,7 +339,7 @@ function toConfigEntry(assessment: ApiAssessment): AssessmentConfigEntry {
     description: assessment.description ?? '',
     maxScore: assessment.maxScore,
     sortOrder: assessment.sortOrder ?? 0,
-    status: assessment.status ?? 'active',
+    status: assessment.status === 'inactive' ? 'inactive' : 'active',
   };
 }
 

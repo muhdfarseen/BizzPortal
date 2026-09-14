@@ -3,6 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { vi } from 'vitest';
 import { AuthService } from '../../../core/services/auth.service';
 import { ToastService } from '../../../core/ui/toast.service';
 import { AssessmentResultsComponent } from './assessment-results';
@@ -10,7 +11,7 @@ import {
   API_BASE,
   CEFR_BANDS,
   SIGN_IN,
-  flushTrainees,
+  pageOf,
   signInWith,
   traineeRows,
 } from '../../../testing/api-testing';
@@ -35,7 +36,11 @@ const EXAMS = [
   { id: '3', name: 'Post', description: 'Final.', maxScore: 90, sortOrder: 3, status: 'active' },
 ];
 
-const ROSTER = traineeRows(25);
+/** Thirty trainees — the first page of 25 plus a part page. */
+const ROSTER = traineeRows(30);
+
+/** The envelope the first page answers with. */
+const FIRST_PAGE = { page: 0, size: 25, totalElements: ROSTER.length };
 
 /** The dropdown is attached on a macrotask, so let it settle. */
 async function flushOverlay(): Promise<void> {
@@ -57,7 +62,10 @@ describe('AssessmentResultsComponent', () => {
     signInWith(http, auth, SIGN_IN.superadmin);
   });
 
-  afterEach(() => http.verify());
+  afterEach(() => {
+    vi.useRealTimers();
+    http.verify();
+  });
 
   function createFixture() {
     const fixture = TestBed.createComponent(TestHostComponent);
@@ -101,15 +109,57 @@ describe('AssessmentResultsComponent', () => {
     fixture.detectChanges();
   }
 
-  /** Selects Bangalore / Batch 01 / LG Alpha and runs the search. */
+  /** The trainees request a paged page is expected to make. */
+  function traineesRequest(match: (params: URLSearchParams) => boolean) {
+    return http.expectOne(
+      (candidate) =>
+        candidate.url === `${API_BASE}/assessments/trainees` &&
+        match(new URLSearchParams(candidate.params.toString())),
+    );
+  }
+
+  /** Selects Bangalore / Batch 01 / LG Alpha, searches and approves the first page. */
   async function searchBangalore(fixture: ReturnType<typeof createFixture>): Promise<void> {
     await chooseFilter(fixture, 0, 'Bangalore');
     await chooseFilter(fixture, 1, 'Batch 01');
     await chooseFilter(fixture, 2, 'LG Alpha');
     searchButton(fixture).click();
     fixture.detectChanges();
-    flushTrainees(http, ROSTER, (params) => params.get('lgId') === '1004');
+    flushTraineesPage(fixture, '1004', FIRST_PAGE);
+  }
+
+  /** Flushes the pending trainees request for one LG with the given envelope metadata. */
+  function flushTraineesPage(
+    fixture: ReturnType<typeof createFixture>,
+    lgId: string,
+    page: { page: number; size: number; totalElements: number },
+  ): void {
+    const rows = ROSTER.slice(page.page * page.size, page.page * page.size + page.size);
+    traineesRequest((params) => params.get('lgId') === lgId).flush(pageOf(rows, page));
     fixture.detectChanges();
+  }
+
+  function summary(fixture: ReturnType<typeof createFixture>): string | undefined {
+    return host(fixture).querySelector('.table-summary')?.textContent?.trim();
+  }
+
+  function typeSearch(fixture: ReturnType<typeof createFixture>, value: string): void {
+    const input = host(fixture).querySelector<HTMLInputElement>(
+      '.table-search-input',
+    ) as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+  }
+
+  function sortButton(fixture: ReturnType<typeof createFixture>, label: string): HTMLButtonElement {
+    const button = Array.from(host(fixture).querySelectorAll<HTMLButtonElement>('.th-sort')).find(
+      (candidate) => candidate.textContent?.trim() === label,
+    );
+    if (!button) {
+      throw new Error(`No sort button labelled "${label}"`);
+    }
+    return button;
   }
 
   it('shows the title and the pre-search guidance', () => {
@@ -149,7 +199,7 @@ describe('AssessmentResultsComponent', () => {
     expect(host(fixture).querySelector('app-assessment-table')).toBeNull();
   });
 
-  it('loads the results table after a search', async () => {
+  it('loads the first page of the group after a search', async () => {
     const fixture = createFixture();
     await searchBangalore(fixture);
 
@@ -157,10 +207,10 @@ describe('AssessmentResultsComponent', () => {
       th.textContent?.trim(),
     );
     expect(headers).toEqual(['Emp ID', 'Name', 'Pre', 'Mid', 'Post', 'Action']);
-    expect(host(fixture).querySelectorAll('tbody tr').length).toBe(10);
-    expect(host(fixture).querySelector('.table-summary')?.textContent?.trim()).toBe(
-      `Showing 1–10 of ${ROSTER.length} trainees`,
-    );
+    expect(host(fixture).querySelectorAll('tbody tr').length).toBe(25);
+    // The server said thirty matched, so the pager counts thirty even though
+    // only twenty-five rows came back.
+    expect(summary(fixture)).toBe(`Showing 1–25 of ${ROSTER.length} trainees`);
   });
 
   it('renders only the exams selected before searching', async () => {
@@ -183,21 +233,81 @@ describe('AssessmentResultsComponent', () => {
     expect(headers).toEqual(['Emp ID', 'Name', 'Pre', 'Post', 'Action']);
   });
 
+  it('asks the server for the next page, with the page and size', async () => {
+    const fixture = createFixture();
+    await searchBangalore(fixture);
+
+    host(fixture).querySelector<HTMLButtonElement>('[aria-label="Next page"]')?.click();
+    fixture.detectChanges();
+
+    const request = traineesRequest(
+      (params) => params.get('page') === '1' && params.get('size') === '25',
+    );
+    request.flush(pageOf(ROSTER.slice(25), { page: 1, size: 25, totalElements: ROSTER.length }));
+    fixture.detectChanges();
+
+    expect(summary(fixture)).toBe('Showing 26–30 of 30 trainees');
+    expect(host(fixture).querySelectorAll('tbody tr').length).toBe(5);
+  });
+
+  it('sends one debounced search to the server and returns to the first page', async () => {
+    const fixture = createFixture();
+    await searchBangalore(fixture);
+
+    vi.useFakeTimers();
+    typeSearch(fixture, 'trainee 1');
+    typeSearch(fixture, 'trainee 12');
+
+    // Still typing: no request has been made.
+    vi.advanceTimersByTime(300);
+    fixture.detectChanges();
+
+    const request = traineesRequest(
+      (params) => params.get('search') === 'trainee 12' && params.get('page') === '0',
+    );
+    request.flush(pageOf(ROSTER.slice(0, 1), { page: 0, size: 25, totalElements: 1 }));
+    fixture.detectChanges();
+
+    expect(summary(fixture)).toBe('Showing 1–1 of 1 trainees');
+    expect(host(fixture).querySelectorAll('tbody tr').length).toBe(1);
+  });
+
+  it('sends the order a header asked for rather than sorting the page', async () => {
+    const fixture = createFixture();
+    await searchBangalore(fixture);
+
+    sortButton(fixture, 'Name').click();
+    fixture.detectChanges();
+
+    const request = traineesRequest(
+      (params) => params.get('sort') === 'name' && params.get('direction') === 'asc',
+    );
+    request.flush(pageOf(ROSTER.slice(0, 25), FIRST_PAGE));
+    fixture.detectChanges();
+
+    expect(host(fixture).querySelector('th[data-column="name"]')?.getAttribute('aria-sort')).toBe(
+      'ascending',
+    );
+  });
+
   it('returns to the first page when a new search runs', async () => {
     const fixture = createFixture();
     await searchBangalore(fixture);
 
     host(fixture).querySelector<HTMLButtonElement>('[aria-label="Next page"]')?.click();
     fixture.detectChanges();
-    expect(host(fixture).querySelector('.table-summary')?.textContent).toContain('Showing 11–20');
+    traineesRequest((params) => params.get('page') === '1').flush(
+      pageOf(ROSTER.slice(25), { page: 1, size: 25, totalElements: ROSTER.length }),
+    );
+    fixture.detectChanges();
+    expect(summary(fixture)).toContain('Showing 26–30');
 
     await chooseFilter(fixture, 2, 'LG Beta');
     searchButton(fixture).click();
     fixture.detectChanges();
-    flushTrainees(http, ROSTER, (params) => params.get('lgId') === '1005');
-    fixture.detectChanges();
+    flushTraineesPage(fixture, '1005', FIRST_PAGE);
 
-    expect(host(fixture).querySelector('.table-summary')?.textContent).toContain('Showing 1–10');
+    expect(summary(fixture)).toContain('Showing 1–25');
   });
 
   it('flags results as stale once the filters change', async () => {
@@ -258,6 +368,8 @@ describe('AssessmentResultsComponent', () => {
 
     // The action that used to pass silently now confirms itself.
     expect(toastMessages()).toEqual(['Scores saved']);
+    // A saved score is folded into the page on screen, so no extra read is made.
+    http.expectNone(`${API_BASE}/assessments/trainees`);
   });
 
   /** The messages currently on the toast stack. */

@@ -9,6 +9,7 @@ import {
   UploadPreview,
   UploadPreviewRow,
   parseCsv,
+  sheetEmployeeIds,
   sheetKind,
   validateUpload,
 } from '../models/assessment-upload.model';
@@ -106,9 +107,11 @@ export class AssessmentUploadService {
   }
 
   /**
-   * Validates a sheet against the group and the assessment it was read for. The
-   * roster comes from the API, so the preview judges the same trainees the
-   * commit will.
+   * Validates a sheet against the group and the assessment it was read for.
+   *
+   * The group is asked only about the employee numbers the sheet names, so a
+   * preview costs one lookup no matter how large the roster is, and the count it
+   * answers with is what reports the trainees the sheet left out.
    */
   preview(
     filter: AssessmentFilter,
@@ -119,13 +122,29 @@ export class AssessmentUploadService {
     if (!exam) {
       return of(rejected('Choose an assessment before uploading.'));
     }
-    return this.assessments.getTrainees(filter).pipe(
-      map((roster) =>
+
+    const employeeIds = sheetEmployeeIds(sheet);
+    const levelFor = (score: number) => this.cefrMapping.levelFor(score);
+    // A sheet with nothing to look up is judged against an empty group: the
+    // column and score checks still run, and no request is made for no ids.
+    if (employeeIds.length === 0) {
+      return of(
         validateUpload({
           rows: sheet,
-          roster,
+          group: { groupSize: 0, trainees: [] },
           exam,
-          levelFor: (score) => this.cefrMapping.levelFor(score),
+          levelFor,
+        }),
+      );
+    }
+
+    return this.assessments.lookupTrainees(filter, employeeIds).pipe(
+      map((group) =>
+        validateUpload({
+          rows: sheet,
+          group,
+          exam,
+          levelFor,
         }),
       ),
     );
