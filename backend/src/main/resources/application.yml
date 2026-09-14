@@ -1,0 +1,97 @@
+spring:
+  application:
+    name: bizzskill-portal-api
+
+  datasource:
+    # Overridable by environment so the same artifact deploys anywhere.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/bizzskill_portal}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:123}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: bizzskill-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+
+  jpa:
+    # Flyway owns the schema. Hibernate only checks that the entities match it,
+    # and fails fast at startup if they do not — the opposite of the silent
+    # `ddl-auto: update` that lets a schema drift away from the code.
+    hibernate:
+      ddl-auto: validate
+    # Off by design: a transaction should be closed before the response is
+    # serialised, so a lazy association can never be loaded during rendering.
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Adopting Flyway on a database the portal already populated: an existing
+    # schema with no history table is baselined at V1 (which mirrors the portal
+    # tables, so there is nothing to create) and V2+ are applied.
+    baseline-on-migrate: true
+    baseline-version: 1
+
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: UTC
+
+  profiles:
+    # Convenience for local development; production sets SPRING_PROFILES_ACTIVE
+    # explicitly. The `local` profile only adds demo data and SQL logging.
+    default: local
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    # Never leak exception messages or stack traces to a client.
+    include-message: never
+    include-stacktrace: never
+  compression:
+    enabled: true
+
+portal:
+  security:
+    # `plain` stores passwords unmasked, at the client's explicit request for now.
+    # Set PORTAL_PASSWORD_ENCODING=bcrypt to hash instead (see PasswordEncoderConfig).
+    password-encoding: ${PORTAL_PASSWORD_ENCODING:plain}
+    # Browser origins allowed to call the API. Never a wildcard: the API carries
+    # bearer tokens and a wildcard would let any site call it.
+    allowed-origins: ${PORTAL_ALLOWED_ORIGINS:http://localhost:4200}
+    jwt:
+      # MUST be replaced in every real deployment; SecurityConfig refuses to start
+      # with a key shorter than 32 bytes. Generate one with: openssl rand -base64 48
+      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdefghijklmnop}
+      issuer: ${JWT_ISSUER:bizzskill-portal}
+      # 8 hours. Longer is convenient, but a token is a snapshot of permissions
+      # and assignments, so it also delays an access change taking effect.
+      ttl: ${JWT_TTL:8h}
+
+logging:
+  level:
+    root: INFO
+    com.bizzskill.portal: INFO
+
+---
+# ── Local development ───────────────────────────────────────────────────────
+spring:
+  config:
+    activate:
+      on-profile: local
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+logging:
+  level:
+    com.bizzskill.portal: DEBUG

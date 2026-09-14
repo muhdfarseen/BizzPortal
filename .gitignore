@@ -1,0 +1,12 @@
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Local environment overrides — real credentials never belong in the repo
+.env
+.env.local
+application-local.yml
