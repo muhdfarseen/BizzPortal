@@ -40,9 +40,12 @@ cd backend
 mvn spring-boot:run
 ```
 
-Serves `http://localhost:8080`. On first run it seeds a small demo organisation
-(5 locations, 6 batches, 7 learning groups, 14 trainees) so the screens have
-something to show; it skips that whenever the portal tables already hold data.
+Serves `http://localhost:8080`. On first run it seeds a demo organisation across
+the fourteen locations the portal is deployed at — 29 batches, 60 learning
+groups and 965 trainees, with Kochi carrying the bulk of them (three batches,
+52-60 trainees in every group) so that paging and searching have something real
+to work against. Seeding is idempotent: running it against a database that
+already holds data tops it up and never updates or deletes what is there.
 
 ### 3. Frontend
 

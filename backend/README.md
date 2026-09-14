@@ -46,7 +46,10 @@ mvn spring-boot:run
 ```
 
 Flyway applies the migrations on startup. The `local` profile (the default) also
-seeds demo organisation data — but only when the portal tables are empty.
+seeds demo organisation data: fourteen locations, 29 batches, 60 learning groups
+and 965 trainees, most of them in Kochi. Every insert is idempotent, so a
+database that already holds data is topped up rather than duplicated, and
+nothing the seed writes is ever updated or deleted.
 
 ### 3. Sign in
 
