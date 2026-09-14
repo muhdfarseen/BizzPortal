@@ -141,6 +141,100 @@ describe('FilterBarComponent', () => {
     expect(labels).toContain('Batch 02');
   });
 
+  it('offers All in every filter, so a narrowed filter can be widened again', async () => {
+    signIn(SIGN_IN.programManager);
+    const fixture = createFixture();
+
+    fixture.componentInstance.allowAll.set(true);
+    fixture.detectChanges();
+
+    const locationOptions = await openDropdown(fixture, 0);
+    expect(locationOptions.map((option) => option.textContent?.trim())).toContain('All');
+    locationOptions.find((option) => option.textContent?.trim() === 'Bangalore')?.click();
+    await flushOverlay();
+    fixture.detectChanges();
+
+    const batchOptions = await openDropdown(fixture, 1);
+    expect(batchOptions.map((option) => option.textContent?.trim())).toContain('All');
+    batchOptions.find((option) => option.textContent?.trim() === 'Batch 01')?.click();
+    await flushOverlay();
+    fixture.detectChanges();
+
+    const lgOptions = await openDropdown(fixture, 2);
+    expect(lgOptions.map((option) => option.textContent?.trim())).toContain('All');
+  });
+
+  it('returns to the whole organisation when All is chosen again', async () => {
+    signIn(SIGN_IN.programManager);
+    const fixture = createFixture();
+    const host = fixture.componentInstance;
+
+    host.allowAll.set(true);
+    fixture.detectChanges();
+
+    const locationOptions = await openDropdown(fixture, 0);
+    locationOptions.find((option) => option.textContent?.trim() === 'Bangalore')?.click();
+    await flushOverlay();
+    fixture.detectChanges();
+    expect(host.changes.at(-1)?.locationId).toBe('BLR');
+
+    // The empty value that means "All" has to be selectable, not merely a
+    // placeholder — a placeholder cannot be chosen, which made picking a
+    // location a one-way door.
+    const reopened = await openDropdown(fixture, 0);
+    reopened.find((option) => option.textContent?.trim() === 'All')?.click();
+    await flushOverlay();
+    fixture.detectChanges();
+
+    expect(host.changes.at(-1)?.locationId).toBeNull();
+    expect(selects(fixture)[0].querySelector('.select-placeholder')?.textContent).toContain('All');
+  });
+
+  it('clears the narrower filters when a wider one is set back to All', async () => {
+    signIn(SIGN_IN.programManager);
+    const fixture = createFixture();
+    const host = fixture.componentInstance;
+
+    host.allowAll.set(true);
+    fixture.detectChanges();
+
+    const locationOptions = await openDropdown(fixture, 0);
+    locationOptions.find((option) => option.textContent?.trim() === 'Bangalore')?.click();
+    await flushOverlay();
+    fixture.detectChanges();
+
+    const batchOptions = await openDropdown(fixture, 1);
+    batchOptions.find((option) => option.textContent?.trim() === 'Batch 01')?.click();
+    await flushOverlay();
+    fixture.detectChanges();
+    // Read the id back rather than hardcoding it, so this does not break when
+    // the fixture's ids change.
+    expect(host.changes.at(-1)?.batchId).toBeTruthy();
+
+    // A batch cannot survive its location being widened away.
+    const reopened = await openDropdown(fixture, 0);
+    reopened.find((option) => option.textContent?.trim() === 'All')?.click();
+    await flushOverlay();
+    fixture.detectChanges();
+
+    expect(host.changes.at(-1)).toMatchObject({
+      locationId: null,
+      batchId: null,
+      lgId: null,
+    });
+  });
+
+  it('does not offer All where the screen requires a full selection', async () => {
+    signIn(SIGN_IN.programManager);
+    const fixture = createFixture();
+
+    // `allowAll` is off by default: the assessments and LAP / Remedial pages
+    // are scoped to one LG and must not be given an organisation-wide choice.
+    const options = await openDropdown(fixture, 0);
+
+    expect(options.map((option) => option.textContent?.trim())).not.toContain('All');
+  });
+
   it('emits a search when the Search button is clicked', () => {
     const fixture = createFixture();
 

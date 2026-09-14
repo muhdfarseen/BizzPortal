@@ -184,26 +184,42 @@ export class FilterBarComponent implements OnInit {
   });
 
   /* ── Options rendered by the `app-select` primitives ─────── */
-  readonly locationOptions = computed<SelectOption[]>(() =>
-    this.locations().map((location) => ({
+
+  /**
+   * The "All" choice, offered only on a screen that supports an unscoped view.
+   *
+   * It is an option in the list rather than only a placeholder. Without it,
+   * picking a specific value is a one-way door: the empty value that means
+   * "All" is what the placeholder stands for, and a placeholder cannot be
+   * chosen, so there was no way back to the whole organisation.
+   */
+  private readonly allOption = computed<SelectOption[]>(() =>
+    this.allowAll() ? [{ value: '', label: 'All' }] : [],
+  );
+
+  readonly locationOptions = computed<SelectOption[]>(() => [
+    ...this.allOption(),
+    ...this.locations().map((location) => ({
       value: location.id,
       label: location.name,
     })),
-  );
+  ]);
 
-  readonly batchOptions = computed<SelectOption[]>(() =>
-    this.availableBatches().map((batch) => ({
+  readonly batchOptions = computed<SelectOption[]>(() => [
+    ...this.allOption(),
+    ...this.availableBatches().map((batch) => ({
       value: batch.id,
       label: batch.name,
     })),
-  );
+  ]);
 
-  readonly lgOptions = computed<SelectOption[]>(() =>
-    this.availableLgs().map((lg) => ({
+  readonly lgOptions = computed<SelectOption[]>(() => [
+    ...this.allOption(),
+    ...this.availableLgs().map((lg) => ({
       value: lg.id,
       label: lg.name,
     })),
-  );
+  ]);
 
   ngOnInit(): void {
     this.selectedExamIds.set(this.exams().map((exam) => exam.id)); // A default outside the session's scope is ignored — the dropdown would not
