@@ -5,14 +5,12 @@ import { map, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { AssessmentExam, AssessmentFilter } from '../models/assessment.model';
 import {
-  SheetCell,
   UploadPreview,
   UploadPreviewRow,
-  parseCsv,
   sheetEmployeeIds,
-  sheetKind,
   validateUpload,
 } from '../models/assessment-upload.model';
+import { SheetCell } from '../models/sheet.model';
 import { AssessmentService } from './assessment.service';
 import { CefrMappingService } from './cefr-mapping.service';
 import { CSV_MIME_TYPE, FileDownloadService } from './file-download.service';
@@ -58,23 +56,6 @@ export class AssessmentUploadService {
   private readonly cefrMapping = inject(CefrMappingService);
 
   private readonly baseUrl = `${environment.apiBaseUrl}/assessments/uploads`;
-
-  /**
-   * Reads an uploaded CSV or Excel file into a matrix of cells, header row
-   * included. The Excel reader is loaded on demand so a CSV-only session never
-   * pays for it.
-   */
-  async readSheet(file: File): Promise<SheetCell[][]> {
-    const kind = sheetKind(file.name);
-    if (kind === 'csv') {
-      return parseCsv(await file.text());
-    }
-    if (kind === 'excel') {
-      const { default: readXlsxFile } = await import('read-excel-file');
-      return (await readXlsxFile(file)) as SheetCell[][];
-    }
-    throw new Error(`${file.name} is not a CSV or Excel file.`);
-  }
 
   /**
    * Downloads the server-generated template for one assessment and hands it to
@@ -155,14 +136,19 @@ export class AssessmentUploadService {
    * were stored. Only rows that passed validation are sent; the server refuses
    * the whole sheet if any of them is a problem, so a partial write is not
    * possible.
+   *
+   * @param assessedOn ISO date the exam was conducted, recorded against every row
+   *                   of the sheet.
    */
   commit(
     filter: AssessmentFilter,
     examId: string,
     rows: readonly UploadPreviewRow[],
+    assessedOn: string,
   ): Observable<number> {
     const body = {
       examId,
+      assessedOn,
       locationId: filter.locationId,
       batchId: numericOrNull(filter.batchId),
       lgId: numericOrNull(filter.lgId),

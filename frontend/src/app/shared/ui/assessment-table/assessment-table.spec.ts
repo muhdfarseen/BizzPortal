@@ -45,7 +45,7 @@ function trainee(
   for (const exam of EXAMS) {
     const score = scores[exam.id];
     if (score !== undefined) {
-      results[exam.id] = { score, cefr: levelFor(score) };
+      results[exam.id] = { score, cefr: levelFor(score), assessedOn: '2026-05-04' };
     }
   }
   return { employeeId: `EMP-${1000 + index}`, name: `Trainee ${index}`, results, ...extra };
@@ -77,7 +77,7 @@ const EDIT_ACTION: AssessmentRowAction = {
   icon: 'reiconEdit2',
 };
 
-/** The text actions the LAP / Remedial page configures on its Remedial tab. */
+/** The text actions the Trainee status page configures on a tab. */
 const TRACK_ACTIONS: readonly AssessmentRowAction[] = [
   { id: 'move-to-lap', label: 'Move to LAP', variant: 'primary' },
   { id: 'close-lap', label: 'Close LAP', variant: 'secondary' },
@@ -337,8 +337,21 @@ describe('AssessmentTableComponent', () => {
 
     // A bare score reads cleaner than "2/100" repeated in every cell…
     expect(cell?.textContent).not.toContain('/100');
-    // …while the scale stays available on hover, exam by exam.
-    expect(cell?.getAttribute('title')).toBe('Pre: 2 out of 100');
+    // …while the scale stays available on hover, exam by exam, along with the
+    // day the exam was conducted.
+    expect(cell?.getAttribute('title')).toBe('Pre: 2 out of 100 · conducted 4 May 2026');
+  });
+
+  it('says an exam not taken yet without inventing a conducted date', () => {
+    const fixture = createFixture();
+    fixture.componentInstance.dataset.set(ROWS_WITH_PENDING);
+    fixture.detectChanges();
+    fixture.detectChanges();
+
+    const cells = bodyRows(fixture)[0].querySelectorAll('.td-result');
+    // The exam that was sat carries its date; the one that was not carries none.
+    expect(cells[0].getAttribute('title')).toBe('Pre: 42 out of 100 · conducted 4 May 2026');
+    expect(cells[1].getAttribute('title')).toBe('Mid not taken yet');
   });
 
   it('shows a placeholder for an exam the trainee has not taken', () => {

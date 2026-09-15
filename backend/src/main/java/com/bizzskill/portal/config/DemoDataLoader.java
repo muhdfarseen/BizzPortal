@@ -51,6 +51,10 @@ public class DemoDataLoader implements ApplicationRunner {
     /** How many seeded trainees may be on each track; the app has no such limit. */
     private static final int MAX_REMEDIAL_TRACKS = 30;
     private static final int MAX_LAP_TRACKS = 8;
+    private static final int MAX_CLEARED_TRAINEES = 12;
+    private static final int MAX_DISCONTINUED_TRAINEES = 4;
+    private static final int MAX_RESIGNED_TRAINEES = 3;
+    private static final int MAX_PURGED_TRAINEES = 2;
 
     // ── The organisation ────────────────────────────────────────────────────
 
@@ -421,13 +425,23 @@ public class DemoDataLoader implements ApplicationRunner {
     }
 
     /**
-     * Puts a share of the seeded trainees on a track, so the LAP / Remedial screen
+     * Gives a share of the seeded trainees a status, so the Trainee status screen
      * is not empty on a fresh database: the weakest baselines onto remedial, the
-     * strongest onto the LAP. Capped, because this is a demo and not a policy.
+     * strongest onto the LAP, some cleared and a few exits. Every status tab is
+     * given some rows, including the outcomes, so the screen shows what it looks
+     * like populated rather than five empty tables. Capped, because this is a demo
+     * and not a policy.
+     *
+     * <p>The branches are mutually exclusive, so no trainee is handed two statuses
+     * and the caps are the number of trainees, not the number of attempts.
      */
     private void seedTracks() {
         int remedial = 0;
         int lap = 0;
+        int cleared = 0;
+        int discontinued = 0;
+        int resigned = 0;
+        int purged = 0;
         int position = 0;
 
         for (Object[] trainee : roster()) {
@@ -436,25 +450,64 @@ public class DemoDataLoader implements ApplicationRunner {
             int pre = baselineScore(employeeId);
 
             if (remedial < MAX_REMEDIAL_TRACKS && pre < 44 && position % 4 == 0) {
-                placeOnTrack(employeeId, "remedial", start,
+                placeOnStatus(employeeId, "remedial", start.plusDays(30),
                         "Baseline below B1; remedial support through this cycle.");
                 remedial++;
             } else if (lap < MAX_LAP_TRACKS && pre >= 76 && position % 11 == 0) {
-                placeOnTrack(employeeId, "lap", start,
+                placeOnStatus(employeeId, "lap", start.plusDays(30),
                         "Baseline at C1; extended work on the LAP track.");
                 lap++;
+            } else if (cleared < MAX_CLEARED_TRAINEES && pre >= 55 && position % 7 == 0) {
+                // Cleared trainees keep the remedial period they came through, so the
+                // history behind a success is on the record rather than implied.
+                recordPastStatus(employeeId, "remedial", start.plusDays(30), start.plusDays(150),
+                        "Baseline below B1; remedial support through this cycle.");
+                placeOnStatus(employeeId, "cleared", start.plusDays(150),
+                        "Completed the remedial cycle; cleared on the post-assessment.");
+                cleared++;
+            } else if (discontinued < MAX_DISCONTINUED_TRAINEES && position % 53 == 0) {
+                placeOnStatus(employeeId, "discontinued", start.plusDays(60),
+                        "Stopped attending after the mid-assessment.");
+                discontinued++;
+            } else if (resigned < MAX_RESIGNED_TRAINEES && position % 71 == 0) {
+                placeOnStatus(employeeId, "resigned", start.plusDays(45),
+                        "Resigned from the organisation during training.");
+                resigned++;
+            } else if (purged < MAX_PURGED_TRAINEES && position % 97 == 0) {
+                placeOnStatus(employeeId, "purged", start.plusDays(20),
+                        "Records purged after a duplicate enrolment was found.");
+                purged++;
             }
             position++;
         }
     }
 
-    private void placeOnTrack(long employeeId, String track, LocalDate start, String remark) {
+    /** Opens the status the trainee currently holds. */
+    private void placeOnStatus(long employeeId, String status, LocalDate start, String remark) {
         jdbc.update("""
-                insert into app_lap_remedial (intemployee_id, intassessment_id, txttrack, txtstatus,
-                                              txtremark, datestart_date, txtcreated_by)
+                insert into app_trainee_status (intemployee_id, intassessment_id, txttrainee_status, txtstate,
+                                                txtremark, datestart_date, txtcreated_by)
                 values (?, 1, ?, 'A', ?, ?::date, 'demo-seed')
-                on conflict (intemployee_id) where txtstatus = 'A' do nothing
-                """, employeeId, track, remark, start.plusDays(30));
+                on conflict (intemployee_id) where txtstate = 'A' do nothing
+                """, employeeId, status, remark, start);
+    }
+
+    /**
+     * Records a status the trainee has since moved on from.
+     *
+     * <p>Skipped when the trainee already has any status row, which is what keeps
+     * this idempotent: the current-status insert above guards itself with the
+     * one-current-row index, but a superseded row has nothing to conflict with.
+     */
+    private void recordPastStatus(
+            long employeeId, String status, LocalDate start, LocalDate end, String remark) {
+        jdbc.update("""
+                insert into app_trainee_status (intemployee_id, intassessment_id, txttrainee_status, txtstate,
+                                                txtremark, datestart_date, dateclose_date, txtcreated_by)
+                select ?, 1, ?, 'C', ?, ?::date, ?::date, 'demo-seed'
+                where not exists (
+                    select 1 from app_trainee_status where intemployee_id = ?)
+                """, employeeId, status, remark, start, end, employeeId);
     }
 
     /** Every seeded trainee with the start date of their batch, oldest id first. */
@@ -532,25 +585,34 @@ public class DemoDataLoader implements ApplicationRunner {
      */
     private void reportWhatIsInPlace() {
         record Counts(int locations, int batches, int groups, int participants,
-                      int results, int tracks) {
+                      int results, int statuses) {
         }
 
         Counts counts = jdbc.queryForObject("""
-                select (select count(*) from location)                              as locations,
-                       (select count(*) from batch)                                 as batches,
-                       (select count(*) from learning_group)                        as groups,
-                       (select count(*) from participant)                           as participants,
-                       (select count(*) from app_assessment_result)                 as results,
-                       (select count(*) from app_lap_remedial where txtstatus = 'A') as tracks
+                select (select count(*) from location)                                as locations,
+                       (select count(*) from batch)                                   as batches,
+                       (select count(*) from learning_group)                          as groups,
+                       (select count(*) from participant)                             as participants,
+                       (select count(*) from app_assessment_result)                   as results,
+                       (select count(*) from app_trainee_status where txtstate = 'A')  as statuses
                 """, (rs, rowNum) -> new Counts(
                 rs.getInt("locations"), rs.getInt("batches"), rs.getInt("groups"),
-                rs.getInt("participants"), rs.getInt("results"), rs.getInt("tracks")));
+                rs.getInt("participants"), rs.getInt("results"), rs.getInt("statuses")));
+
+        // Broken down by status, because "12 trainees hold a status" says nothing
+        // about whether the Trainee status tabs have anything to show.
+        List<String> byStatus = jdbc.queryForList("""
+                select txttrainee_status || ' ' || count(*)
+                from app_trainee_status where txtstate = 'A'
+                group by txttrainee_status order by txttrainee_status
+                """, String.class);
 
         if (counts != null) {
             log.info("Demo portal data in place: {} locations, {} batches, {} learning groups, "
-                            + "{} participants, {} assessment results, {} open tracks.",
+                            + "{} participants, {} assessment results, {} trainees holding a status ({}).",
                     counts.locations(), counts.batches(), counts.groups(),
-                    counts.participants(), counts.results(), counts.tracks());
+                    counts.participants(), counts.results(), counts.statuses(),
+                    byStatus.isEmpty() ? "none" : String.join(", ", byStatus));
         }
     }
 }

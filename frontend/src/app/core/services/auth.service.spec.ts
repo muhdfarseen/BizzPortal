@@ -78,11 +78,13 @@ describe('AuthService', () => {
       expect(withUsers).toEqual(['superadmin']);
     });
 
-    it('never gives Faculty the ability to move LAP / Remedial tracks', () => {
-      expect(permissionsForRole('faculty')).not.toContain('lap-remedial.manage');
-      expect(permissionsForRole('faculty')).toContain('lap-remedial.view');
+    it('gives Faculty the ability to change a trainee status', () => {
+      // Both the row action and the bulk sheet need it, and faculty are the people
+      // who decide who needs remedial support.
+      expect(permissionsForRole('faculty')).toContain('trainee-status.manage');
+      expect(permissionsForRole('faculty')).toContain('trainee-status.view');
       expect(permissionsForRole('faculty')).toContain('assessments.edit');
-      expect(permissionsForRole('location-admin')).toContain('lap-remedial.manage');
+      expect(permissionsForRole('location-admin')).toContain('trainee-status.manage');
     });
   });
 
@@ -152,7 +154,7 @@ describe('AuthService', () => {
       expect(auth.role()).toBe('superadmin');
       expect(auth.has('users.manage')).toBe(true);
       expect(auth.has('configuration.manage')).toBe(true);
-      expect(auth.has('lap-remedial.manage')).toBe(true);
+      expect(auth.has('trainee-status.manage')).toBe(true);
     });
 
     it('refuses a deactivated account and says why', () => {

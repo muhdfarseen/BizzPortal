@@ -1,9 +1,9 @@
 package com.bizzskill.portal.assessment.repository;
 
-import com.bizzskill.portal.assessment.entity.AppLapRemedial;
-import com.bizzskill.portal.common.enums.LapStatus;
-import com.bizzskill.portal.common.enums.LapTrack;
-import com.bizzskill.portal.common.enums.TrackFilter;
+import com.bizzskill.portal.assessment.entity.AppTraineeStatus;
+import com.bizzskill.portal.common.enums.StatusFilter;
+import com.bizzskill.portal.common.enums.StatusState;
+import com.bizzskill.portal.common.enums.TraineeStatus;
 import com.bizzskill.portal.organization.entity.Participant;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
@@ -15,13 +15,14 @@ import org.springframework.data.jpa.domain.Specification;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 /**
  * The predicates behind a paged roster read.
  *
  * <p>Composed here rather than as a bank of derived query methods because the
- * filters are optional and independent: scope, search and track status each may
- * be present or absent, and four scope branches crossed with three track filters
+ * filters are optional and independent: scope, search and trainee status each may
+ * be present or absent, and four scope branches crossed with five status filters
  * would be a dozen near-identical finders.
  *
  * <p>Every predicate is written against the database, so the filters narrow the
@@ -110,34 +111,36 @@ public final class TraineeRosterSpecifications {
     }
 
     /**
-     * Keeps only trainees whose current LAP / Remedial state matches.
+     * Keeps only trainees whose current trainee status matches the tab asked for.
      *
-     * <p>"Current" is the open row: the database enforces at most one open track per
+     * <p>"Current" is the row flagged current: the database enforces at most one per
      * trainee with a partial unique index, so a correlated {@code exists} is exact
      * rather than an approximation that has to pick among several rows.
+     *
+     * <p>The Regular tab asks for a set of no statuses at all, and is the same query
+     * negated — which is why neither case needs a join or a null check on the
+     * participant.
      */
-    public static Specification<Participant> onTrack(TrackFilter filter) {
+    public static Specification<Participant> hasStatus(StatusFilter filter) {
         if (filter == null) {
             return null;
         }
         return (root, query, builder) -> {
-            Subquery<Long> open = query.subquery(Long.class);
-            Root<AppLapRemedial> track = open.from(AppLapRemedial.class);
+            Subquery<Long> current = query.subquery(Long.class);
+            Root<AppTraineeStatus> period = current.from(AppTraineeStatus.class);
 
             List<Predicate> parts = new ArrayList<>();
-            parts.add(builder.equal(track.get("intEmployeeId"), root.get("intEmployeeId")));
-            parts.add(builder.equal(track.get("txtStatus"), LapStatus.OPEN));
+            parts.add(builder.equal(period.get("intEmployeeId"), root.get("intEmployeeId")));
+            parts.add(builder.equal(period.get("txtState"), StatusState.CURRENT));
 
-            LapTrack wanted = filter.track();
-            if (wanted != null) {
-                parts.add(builder.equal(track.get("txtTrack"), wanted));
+            Set<TraineeStatus> wanted = filter.statuses();
+            if (!wanted.isEmpty()) {
+                parts.add(period.get("txtTraineeStatus").in(wanted));
             }
 
-            open.select(track.get("intLapRemedialId")).where(parts.toArray(new Predicate[0]));
+            current.select(period.get("intTraineeStatusId")).where(parts.toArray(new Predicate[0]));
 
-            // "No track" is the same query negated, which is why the track filter
-            // needs no join and no null check on the participant.
-            return filter == TrackFilter.NONE ? builder.not(builder.exists(open)) : builder.exists(open);
+            return filter.isAbsence() ? builder.not(builder.exists(current)) : builder.exists(current);
         };
     }
 }

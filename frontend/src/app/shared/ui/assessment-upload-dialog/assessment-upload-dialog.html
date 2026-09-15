@@ -17,7 +17,8 @@
             @if (step() === 'setup') {
               Download the template, fill in the scores, then upload the sheet back.
             } @else if (step() === 'preview') {
-              {{ fileName() }} &bull; {{ selectedExam()?.name }}
+              {{ fileName() }} &bull; {{ selectedExam()?.name }} &bull; conducted
+              {{ conductedOnLabel() }}
             } @else {
               {{ selectedExam()?.name }} &bull; upload complete
             }
@@ -32,69 +33,79 @@
 
     <div class="modal-body">
       <!-- ── Step 1: group, assessment, template ─────────────── -->
-      @if (step() === 'setup') {
-        <section class="step" aria-label="Choose group and assessment">
-          <h3 class="step-title">Choose the group and the assessment</h3>
+      <!-- Kept mounted for the life of the dialog rather than re-created on every
+           return to it: the filter bar reports its state when it initialises, so
+           rebuilding it would overwrite the group the user already chose with a
+           fresh default the moment they stepped back from the preview. -->
+      <section class="step" aria-label="Choose group and assessment" [hidden]="step() !== 'setup'">
+        <h3 class="step-title">Choose the group and the assessment</h3>
 
-          <!-- Exams are picked separately below: one assessment per upload. -->
-          <app-filter-bar
-            [exams]="[]"
-            [showSearch]="false"
-            (filterChange)="onFilterChange($event)"
+        <!-- Exams are picked separately below: one assessment per upload. -->
+        <app-filter-bar [exams]="[]" [showSearch]="false" (filterChange)="onFilterChange($event)" />
+
+        <label class="field">
+          <span class="field-label">Assessment</span>
+          <app-select
+            [options]="examOptions()"
+            [value]="examId()"
+            placeholder="Select assessment"
+            ariaLabel="Assessment"
+            (valueChange)="onExamChange($event)"
           />
+        </label>
 
-          <label class="field">
-            <span class="field-label">Assessment</span>
-            <app-select
-              [options]="examOptions()"
-              [value]="examId()"
-              placeholder="Select assessment"
-              ariaLabel="Assessment"
-              (valueChange)="onExamChange($event)"
-            />
-          </label>
+        <label class="field">
+          <span class="field-label">Exam conducted on</span>
+          <input
+            type="date"
+            class="field-input"
+            [value]="assessedOn()"
+            [attr.max]="latestAssessedOn"
+            aria-label="Exam conducted on"
+            (input)="onAssessedOnChange($event)"
+          />
+          <span class="field-hint">
+            The date the group sat the exam &mdash; recorded with every score in the sheet, and not
+            necessarily today.
+          </span>
+        </label>
 
-          <div class="step-actions">
-            <button
-              type="button"
-              class="btn-secondary"
-              [disabled]="!canUseGroup()"
-              (click)="downloadTemplate()"
-            >
-              <ng-icon name="reiconDocumentDownload" size="16" />
-              Download template
-            </button>
+        <div class="step-actions">
+          <button
+            type="button"
+            class="btn-secondary"
+            [disabled]="!canUseGroup()"
+            (click)="downloadTemplate()"
+          >
+            <ng-icon name="reiconDocumentDownload" size="16" />
+            Download template
+          </button>
 
-            <button
-              type="button"
-              class="btn-primary"
-              [disabled]="!canUseGroup() || isReading()"
-              (click)="fileInput.click()"
-            >
-              <ng-icon name="reiconUpload" size="16" />
-              {{ isReading() ? 'Reading…' : 'Choose file' }}
-            </button>
+          <button
+            type="button"
+            class="btn-primary"
+            [disabled]="!canUseGroup() || isReading()"
+            (click)="fileInput.click()"
+          >
+            <ng-icon name="reiconUpload" size="16" />
+            {{ isReading() ? 'Reading…' : 'Choose file' }}
+          </button>
 
-            <input
-              #fileInput
-              type="file"
-              class="file-input"
-              [attr.accept]="accept"
-              (change)="onFileSelected($event)"
-            />
-          </div>
+          <input
+            #fileInput
+            type="file"
+            class="file-input"
+            [attr.accept]="accept"
+            (change)="onFileSelected($event)"
+          />
+        </div>
 
-          <p class="hint">
-            The template lists every trainee of the selected learning group with their Emp ID, Name
-            and current Score. Update the Score column and upload the file — leave the other columns
-            as they are. CSV and Excel (.xlsx) are accepted.
-          </p>
-
-          @if (readError(); as error) {
-            <p class="alert alert--error" role="alert">{{ error }}</p>
-          }
-        </section>
-      }
+        <p class="hint">
+          The template lists every trainee of the selected learning group with their Emp ID, Name
+          and current Score. Update the Score column and upload the file — leave the other columns
+          as they are. CSV and Excel (.xlsx) are accepted.
+        </p>
+      </section>
 
       <!-- ── Step 2: preview and confirm ─────────────────────── -->
       @if (step() === 'preview') {
@@ -117,6 +128,9 @@
                   <strong>{{ result.missingFromSheet }}</strong> in the group not in the file
                 </li>
               }
+              <li>
+                conducted <strong>{{ conductedOnLabel() }}</strong>
+              </li>
             </ul>
 
             <div class="preview-scroll">
@@ -185,9 +199,13 @@
           <h3 class="step-title">{{ imported() }} results uploaded</h3>
           <p class="hint">
             The scores are stored against {{ selectedExam()?.name }} for the selected learning
-            group.
+            group, conducted on {{ conductedOnLabel() }}.
           </p>
         </section>
+      }
+
+      @if (readError(); as error) {
+        <p class="alert alert--error" role="alert">{{ error }}</p>
       }
     </div>
 

@@ -2,7 +2,7 @@
 
 An internal training-assessment portal: administrators configure assessments and
 CEFR bands, faculty score trainees against them, and the results drive CEFR badges
-and a LAP / Remedial programme.
+and a trainee status programme — remedial support, LAP, clearance, or an exit.
 
 Two applications, in two directories:
 
@@ -97,7 +97,7 @@ backend/src/main/java/com/bizzskill/portal/
 ├── auth/           sign-in and token issuing
 ├── organization/   locations, batches, learning groups, participants
 ├── user/           accounts, roles, permissions, assignments
-├── assessment/     assessments, CEFR mapping, results, LAP/Remedial, uploads
+├── assessment/     assessments, CEFR mapping, results, trainee status, uploads
 ├── security/       token service, principal, password encoder
 ├── config/         security, JPA auditing, demo seed
 └── common/         audit base class, enums, error model, health probe
@@ -189,11 +189,13 @@ Both halves are complete and run against each other.
 
 **Backend** — authentication, the organisation hierarchy, configuration
 (assessments and the CEFR mapping), user management, the dashboard figures, and
-the assessment workflow including score entry, LAP / Remedial tracking and the CSV
-bulk upload, with every score change written to an audit trail. 24 endpoints,
-90 tests.
+the assessment workflow including score entry, trainee status tracking and the CSV
+bulk upload, with every score change written to an audit trail. The same sheet
+treatment carries trainee-status changes: a template built for one tab of one group,
+with the assessment marks beside each trainee so a faculty member can fill the status
+in from the marks they are looking at. 27 endpoints, 137 backend tests.
 
-Both the assessment results and the LAP / Remedial tables carry a search box,
+Both the assessment results and the Trainee Status tables carry a search box,
 matching a partial name or employee id case-insensitively — typing either
 "aarav" or "41207" finds the same person. Paging, searching, filtering and
 ordering are all done by the database and sent one page at a time, so a group of

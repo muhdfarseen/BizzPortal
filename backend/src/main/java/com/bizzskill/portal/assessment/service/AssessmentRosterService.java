@@ -7,14 +7,13 @@ import com.bizzskill.portal.assessment.dto.TraineeResultsRequest;
 import com.bizzskill.portal.assessment.entity.AppAssessment;
 import com.bizzskill.portal.assessment.entity.AppAssessmentResult;
 import com.bizzskill.portal.assessment.entity.AppCefrBand;
-import com.bizzskill.portal.assessment.entity.AppLapRemedial;
+import com.bizzskill.portal.assessment.entity.AppTraineeStatus;
 import com.bizzskill.portal.assessment.repository.AppAssessmentRepository;
 import com.bizzskill.portal.assessment.repository.AppAssessmentResultRepository;
-import com.bizzskill.portal.assessment.repository.AppLapRemedialRepository;
-import com.bizzskill.portal.common.enums.LapStatus;
-import com.bizzskill.portal.common.enums.LapTrack;
+import com.bizzskill.portal.assessment.repository.AppTraineeStatusRepository;
+import com.bizzskill.portal.common.enums.StatusState;
 import com.bizzskill.portal.common.error.ApiErrorResponse.FieldViolation;
-import com.bizzskill.portal.common.enums.TrackFilter;
+import com.bizzskill.portal.common.enums.StatusFilter;
 import com.bizzskill.portal.common.error.RequestValidationException;
 import com.bizzskill.portal.common.web.PageQuery;
 import com.bizzskill.portal.common.web.PageResponse;
@@ -64,7 +63,7 @@ public class AssessmentRosterService {
     private final AppAssessmentRepository assessments;
     private final AppAssessmentResultRepository results;
     private final AssessmentResultWriter resultWriter;
-    private final AppLapRemedialRepository lapRemedial;
+    private final AppTraineeStatusRepository traineeStatuses;
     private final CefrMappingService cefrMapping;
 
     public AssessmentRosterService(
@@ -72,23 +71,23 @@ public class AssessmentRosterService {
             AppAssessmentRepository assessments,
             AppAssessmentResultRepository results,
             AssessmentResultWriter resultWriter,
-            AppLapRemedialRepository lapRemedial,
+            AppTraineeStatusRepository traineeStatuses,
             CefrMappingService cefrMapping) {
         this.scope = scope;
         this.assessments = assessments;
         this.results = results;
         this.resultWriter = resultWriter;
-        this.lapRemedial = lapRemedial;
+        this.traineeStatuses = traineeStatuses;
         this.cefrMapping = cefrMapping;
     }
 
     /**
-     * One page of a filtered group's roster, with each trainee's results and track.
+     * One page of a filtered group's roster, with each trainee's results and status.
      *
-     * <p>Paged in the database, not in memory: the scope, search and track filters
+     * <p>Paged in the database, not in memory: the scope, search and status filters
      * are all part of the query that selects the page, so a group of ten thousand
      * costs the same as a group of ten. Only the page's employee ids are then used
-     * to fetch results and tracks, so the per-page work stays proportional to the
+     * to fetch results and statuses, so the per-page work stays proportional to the
      * page rather than to the group.
      */
     public PageResponse<TraineeAssessmentResponse> roster(
@@ -97,14 +96,14 @@ public class AssessmentRosterService {
             Long batchId,
             Long lgId,
             PageQuery paging,
-            TrackFilter track,
+            StatusFilter status,
             String sort,
             String direction) {
 
         Sort order = SortQuery.resolve(sort, direction, ROSTER_SORTABLE, ROSTER_TIE_BREAKERS);
 
         Page<Participant> page =
-                scope.page(caller, locationId, batchId, lgId, paging, track, order);
+                scope.page(caller, locationId, batchId, lgId, paging, status, order);
 
         List<Participant> trainees = page.getContent();
         if (trainees.isEmpty()) {
@@ -117,11 +116,13 @@ public class AssessmentRosterService {
                 results.findByIntEmployeeIdIn(employeeIds).stream()
                         .collect(Collectors.groupingBy(AppAssessmentResult::getIntEmployeeId));
 
-        // Newest first, so the first open row and the first closed row are the
-        // current track and the most recently closed one.
-        Map<Long, List<AppLapRemedial>> tracksByEmployee =
-                lapRemedial.findByIntEmployeeIdInOrderByDateStartDateDesc(employeeIds).stream()
-                        .collect(Collectors.groupingBy(AppLapRemedial::getIntEmployeeId));
+        // Newest first, so the current period and the most recently superseded one
+        // are the first of each kind.
+        Map<Long, List<AppTraineeStatus>> statusesByEmployee =
+                traineeStatuses
+                        .findByIntEmployeeIdInOrderByDateStartDateDescIntTraineeStatusIdDesc(employeeIds)
+                        .stream()
+                        .collect(Collectors.groupingBy(AppTraineeStatus::getIntEmployeeId));
 
         // Loaded once and reused for every score on the roster.
         List<AppCefrBand> bands = cefrMapping.orderedBands();
@@ -130,7 +131,7 @@ public class AssessmentRosterService {
                 .map(trainee -> toRow(
                         trainee,
                         resultsByEmployee.getOrDefault(trainee.getIntEmployeeId(), List.of()),
-                        tracksByEmployee.getOrDefault(trainee.getIntEmployeeId(), List.of()),
+                        statusesByEmployee.getOrDefault(trainee.getIntEmployeeId(), List.of()),
                         bands))
                 .toList();
 
@@ -230,7 +231,12 @@ public class AssessmentRosterService {
 
         String actor = caller.username();
         for (Map.Entry<Long, Integer> entry : pending.entrySet()) {
-            resultWriter.write(trainee.getIntEmployeeId(), entry.getKey(), entry.getValue(), bands, actor);
+            // Inline entry happens while the faculty member is looking at the
+            // trainee, so the day it is keyed in is the day of the exam; the bulk
+            // upload, which is routinely run after the fact, carries its own date.
+            resultWriter.write(
+                    trainee.getIntEmployeeId(), entry.getKey(), entry.getValue(),
+                    LocalDate.now(), bands, actor);
         }
     }
 
@@ -249,7 +255,7 @@ public class AssessmentRosterService {
     private TraineeAssessmentResponse toRow(
             Participant trainee,
             List<AppAssessmentResult> traineeResults,
-            List<AppLapRemedial> tracks,
+            List<AppTraineeStatus> statusPeriods,
             List<AppCefrBand> bands) {
 
         Map<String, TraineeResultResponse> resultsByExam = new LinkedHashMap<>();
@@ -261,29 +267,31 @@ public class AssessmentRosterService {
                     String.valueOf(result.getIntAssessmentId()),
                     new TraineeResultResponse(
                             result.getIntScore(),
-                            CefrMappingService.levelFor(result.getIntScore(), bands)));
+                            CefrMappingService.levelFor(result.getIntScore(), bands),
+                            result.getDateAssessedOn()));
         }
 
-        AppLapRemedial open = tracks.stream()
-                .filter(track -> track.getTxtStatus() == LapStatus.OPEN)
+        AppTraineeStatus current = statusPeriods.stream()
+                .filter(AppTraineeStatus::isCurrent)
                 .findFirst()
                 .orElse(null);
-        AppLapRemedial lastClosed = tracks.stream()
-                .filter(track -> track.getTxtStatus() == LapStatus.CLOSED)
+        AppTraineeStatus lastSuperseded = statusPeriods.stream()
+                .filter(period -> !period.isCurrent())
                 .findFirst()
                 .orElse(null);
 
-        // Mirrors the client: on a track, the start date and the reason; otherwise
-        // the close date of the track that was closed and its reason.
-        if (open != null) {
+        // Mirrors the client: holding a status, the day it began and the reason for
+        // it; holding none, the date of the status that ended and its reason, which
+        // is what explains how they came to be regular again.
+        if (current != null) {
             return new TraineeAssessmentResponse(
                     String.valueOf(trainee.getIntEmployeeId()),
                     trainee.getTxtParticipantName(),
                     resultsByExam,
-                    toStatus(open.getTxtTrack()),
-                    iso(open.getDateStartDate()),
+                    current.getTxtTraineeStatus().getCode(),
+                    iso(current.getDateStartDate()),
                     null,
-                    open.getTxtRemark());
+                    current.getTxtRemark());
         }
 
         return new TraineeAssessmentResponse(
@@ -292,12 +300,8 @@ public class AssessmentRosterService {
                 resultsByExam,
                 null,
                 null,
-                lastClosed == null ? null : iso(lastClosed.getDateCloseDate()),
-                lastClosed == null ? null : lastClosed.getTxtRemark());
-    }
-
-    private String toStatus(LapTrack track) {
-        return track == LapTrack.LAP ? "lap" : "remedial";
+                lastSuperseded == null ? null : iso(lastSuperseded.getDateCloseDate()),
+                lastSuperseded == null ? null : lastSuperseded.getTxtRemark());
     }
 
     private String iso(LocalDate date) {

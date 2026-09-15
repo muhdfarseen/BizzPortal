@@ -145,8 +145,8 @@ const ALL_PERMISSIONS = [
   'assessments.view',
   'configuration.manage',
   'dashboard.view',
-  'lap-remedial.manage',
-  'lap-remedial.view',
+  'trainee-status.manage',
+  'trainee-status.view',
   'reports.view',
   'users.manage',
 ];
@@ -159,8 +159,8 @@ const LOCATION_ADMIN_PERMISSIONS = [
   'assessments.edit',
   'assessments.view',
   'dashboard.view',
-  'lap-remedial.manage',
-  'lap-remedial.view',
+  'trainee-status.manage',
+  'trainee-status.view',
   'reports.view',
 ];
 
@@ -168,7 +168,8 @@ const FACULTY_PERMISSIONS = [
   'assessments.edit',
   'assessments.view',
   'dashboard.view',
-  'lap-remedial.view',
+  'trainee-status.manage',
+  'trainee-status.view',
   'reports.view',
 ];
 
@@ -317,11 +318,11 @@ export const API_PERMISSIONS: readonly ApiPermissionDefinition[] = [
   { id: 'assessments.view', label: 'View Assessments', description: 'Read assessment results' },
   { id: 'assessments.edit', label: 'Record Assessment Results', description: 'Enter scores' },
   {
-    id: 'lap-remedial.view',
-    label: 'View LAP / Remedial',
-    description: 'See LAP / Remedial tracks',
+    id: 'trainee-status.view',
+    label: 'View Trainee Status',
+    description: 'See the status trainees hold',
   },
-  { id: 'lap-remedial.manage', label: 'Manage LAP / Remedial', description: 'Move trainees' },
+  { id: 'trainee-status.manage', label: 'Manage Trainee Status', description: 'Change a status' },
   { id: 'reports.view', label: 'Reports', description: 'View reports' },
   { id: 'users.manage', label: 'User Management', description: 'Manage portal users' },
   { id: 'configuration.manage', label: 'Exam Configuration', description: 'Edit exams' },

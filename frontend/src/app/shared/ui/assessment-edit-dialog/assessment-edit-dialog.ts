@@ -8,6 +8,7 @@ import {
   TraineeAssessment,
   cefrBadge,
   isValidScore,
+  todayIsoDate,
 } from '../../../core/models/assessment.model';
 import { CefrMappingService } from '../../../core/services/cefr-mapping.service';
 
@@ -119,7 +120,13 @@ export class AssessmentEditDialogComponent {
       if (!isValidScore(score, draft.exam.maxScore) || existing?.score === score) {
         continue;
       }
-      changes[draft.exam.id] = { score, cefr: this.cefrMapping.levelFor(score) };
+      changes[draft.exam.id] = {
+        score,
+        cefr: this.cefrMapping.levelFor(score),
+        // A score keyed in here is conducted today, which is what the server
+        // records; the date is not the faculty member's to choose on this path.
+        assessedOn: todayIsoDate(),
+      };
     }
 
     return changes;

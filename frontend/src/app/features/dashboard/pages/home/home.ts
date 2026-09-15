@@ -18,7 +18,7 @@ import { NgIcon, provideIcons } from '@ng-icons/core';
 import { reiconLayers, reiconUsers, reiconBookOpen, reiconClipboardList } from '@ng-icons/reicon';
 
 interface DonutDatum {
-  category: 'Regular' | 'Remedial' | 'LAP';
+  category: 'Regular' | 'Remedial' | 'LAP' | 'Cleared' | 'Others';
   label: string;
   count: number;
   color: string;
@@ -91,6 +91,8 @@ export class HomeComponent implements AfterViewInit, OnDestroy {
       regular: totals.regular,
       remedial: totals.remedial,
       lap: totals.lap,
+      cleared: totals.cleared,
+      others: totals.others,
     };
   });
 
@@ -164,7 +166,7 @@ export class HomeComponent implements AfterViewInit, OnDestroy {
       if (dist.regular > 0) {
         data.push({
           category: 'Regular',
-          label: 'No LAP/Remedial',
+          label: 'Regular',
           count: dist.regular,
           color: '#2469bc',
         });
@@ -183,6 +185,22 @@ export class HomeComponent implements AfterViewInit, OnDestroy {
           label: 'LAP',
           count: dist.lap,
           color: '#ef4444',
+        });
+      }
+      if (dist.cleared > 0) {
+        data.push({
+          category: 'Cleared',
+          label: 'Cleared',
+          count: dist.cleared,
+          color: '#10b981',
+        });
+      }
+      if (dist.others > 0) {
+        data.push({
+          category: 'Others',
+          label: 'Others',
+          count: dist.others,
+          color: '#94a3b8',
         });
       }
     } else {

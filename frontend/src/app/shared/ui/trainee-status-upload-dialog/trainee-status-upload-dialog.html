@@ -1,0 +1,243 @@
+<div class="modal-backdrop" (click)="onCancel()">
+  <div
+    class="modal-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="upload-status-title"
+    (click)="$event.stopPropagation()"
+  >
+    <header class="modal-header">
+      <div class="modal-title-area">
+        <span class="modal-icon-badge" aria-hidden="true">
+          <ng-icon name="reiconUpload" size="20" />
+        </span>
+        <div>
+          <h2 id="upload-status-title" class="modal-title">Bulk status change</h2>
+          <p class="modal-subtitle">
+            @if (step() === 'setup') {
+              Download the sheet for one tab, mark the statuses in it, then upload it back.
+            } @else if (step() === 'preview') {
+              {{ fileName() }} &bull; {{ tabLabel(status()) }} tab
+            } @else {
+              {{ tabLabel(status()) }} tab &bull; upload complete
+            }
+          </p>
+        </div>
+      </div>
+
+      <button type="button" class="modal-close-btn" aria-label="Close dialog" (click)="onCancel()">
+        <ng-icon name="reiconCloseCircle" size="20" />
+      </button>
+    </header>
+
+    <div class="modal-body">
+      <!-- ── Step 1: group, tab, marks ───────────────────────── -->
+      <!-- Kept mounted for the life of the dialog rather than re-created on every
+           return to it: the filter bar reports its state when it initialises, so
+           rebuilding it would overwrite the group the user already chose with a
+           fresh default the moment they stepped back from the preview. -->
+      <section class="step" aria-label="Choose group and status tab" [hidden]="step() !== 'setup'">
+        <h3 class="step-title">Choose the group and the tab</h3>
+
+        <!-- The exams chosen here become the sheet's mark columns. -->
+        <app-filter-bar
+          [exams]="exams()"
+          [showSearch]="false"
+          (filterChange)="onFilterChange($event)"
+        />
+
+        <label class="field">
+          <span class="field-label">Status tab</span>
+          <app-select
+            [options]="statusOptions"
+            [value]="status()"
+            placeholder="Select a tab"
+            ariaLabel="Status tab"
+            (valueChange)="onStatusChange($event)"
+          />
+          <span class="field-hint">
+            Only the trainees of this tab are written to the sheet &mdash; choosing Regular
+            downloads the trainees who hold no status.
+          </span>
+        </label>
+
+        <div class="step-actions">
+          <button
+            type="button"
+            class="btn-secondary"
+            [disabled]="!canUseGroup()"
+            (click)="downloadTemplate()"
+          >
+            <ng-icon name="reiconDocumentDownload" size="16" />
+            Download template
+          </button>
+
+          <button
+            type="button"
+            class="btn-primary"
+            [disabled]="!groupReady() || isReading()"
+            (click)="fileInput.click()"
+          >
+            <ng-icon name="reiconUpload" size="16" />
+            {{ isReading() ? 'Reading…' : 'Choose file' }}
+          </button>
+
+          <input
+            #fileInput
+            type="file"
+            class="file-input"
+            [attr.accept]="accept"
+            (change)="onFileSelected($event)"
+          />
+        </div>
+
+        <p class="hint">
+          The template lists every trainee of the tab with their Emp ID, Name
+          @if (chosenExams().length) {
+            , the marks for
+            @for (exam of chosenExams(); track exam.id; let last = $last) {
+              {{ exam.name }}{{ last ? '' : ', ' }}
+            }
+          }
+          and their current status. Fill in <strong>New Status</strong>,
+          <strong>Effective Date</strong> and <strong>Remark</strong> for the trainees you are
+          changing and leave the rest blank &mdash; a blank row asks for nothing. The marks are
+          there to read; the portal stores none of them. CSV and Excel (.xlsx) are accepted.
+        </p>
+
+        @if (!groupReady()) {
+          <p class="hint">Choose a location, a batch and a learning group to begin.</p>
+        } @else if (!canUseGroup()) {
+          <p class="hint">Choose at least one assessment, so the sheet shows its marks.</p>
+        }
+      </section>
+
+      <!-- ── Step 2: preview and confirm ─────────────────────── -->
+      @if (step() === 'preview') {
+        <section class="step" aria-label="Review the uploaded sheet">
+          @if (sheetError(); as error) {
+            <p class="alert alert--error" role="alert">{{ error }}</p>
+          } @else if (preview(); as result) {
+            <ul class="summary">
+              <li>
+                <strong>{{ result.rows.length }}</strong> rows with something in them
+              </li>
+              <li class="summary-ok">
+                <strong>{{ result.readyRows }}</strong> ready to apply
+              </li>
+              <li [class.summary-bad]="result.errorRows > 0">
+                <strong>{{ result.errorRows }}</strong> with errors
+              </li>
+              <li>
+                <strong>{{ result.unchangedRows }}</strong> left alone
+              </li>
+            </ul>
+
+            <div class="preview-scroll">
+              <table class="preview-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Row</th>
+                    <th scope="col">Emp ID</th>
+                    <th scope="col">Name</th>
+                    <th scope="col">New Status</th>
+                    <th scope="col">Effective Date</th>
+                    <th scope="col">Remark</th>
+                    <th scope="col">Validation</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of rows(); track row.rowNumber) {
+                    <tr
+                      [class.is-invalid]="row.errors.length > 0"
+                      [class.is-skipped]="row.requestedText === ''"
+                    >
+                      <td class="cell-number">{{ row.rowNumber }}</td>
+                      <td>{{ row.employeeId || '—' }}</td>
+                      <td>{{ row.rosterName || '—' }}</td>
+                      <td>
+                        @if (row.requested; as requested) {
+                          {{ statusLabel(requested) }}
+                        } @else if (row.requestedText) {
+                          {{ row.requestedText }}
+                        } @else {
+                          —
+                        }
+                      </td>
+                      <td class="cell-number">
+                        {{ row.effectiveDate ? formatDate(row.effectiveDate) : '—' }}
+                      </td>
+                      <td class="cell-remark">{{ row.remark || '—' }}</td>
+                      <td>
+                        @if (row.errors.length) {
+                          <ul class="issue-list">
+                            @for (error of row.errors; track error.code) {
+                              <li class="issue issue--error">{{ error.message }}</li>
+                            }
+                          </ul>
+                        } @else if (row.requestedText === '') {
+                          <span class="issue">No change &mdash; left as it is</span>
+                        } @else {
+                          <span class="issue issue--ok">Ready to apply</span>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+
+            @if (hasErrors()) {
+              <button type="button" class="btn-link" (click)="downloadErrors()">
+                <ng-icon name="reiconDocumentDownload" size="16" />
+                Download errors (CSV)
+              </button>
+            }
+          }
+        </section>
+      }
+
+      <!-- ── Step 3: outcome ─────────────────────────────────── -->
+      @if (step() === 'done') {
+        <section class="step step--done" aria-label="Upload complete">
+          <span class="done-icon" aria-hidden="true">
+            <ng-icon name="reiconTickCircle" size="32" />
+          </span>
+          <h3 class="step-title">
+            {{ applied() === 1 ? '1 status updated' : applied() + ' statuses updated' }}
+          </h3>
+          <p class="hint">
+            Each change was dated and recorded against the trainee, and the status it replaced is
+            kept as history rather than overwritten.
+          </p>
+        </section>
+      }
+
+      @if (readError(); as error) {
+        <p class="alert alert--error" role="alert">{{ error }}</p>
+      }
+    </div>
+
+    <footer class="modal-footer">
+      @if (step() === 'setup') {
+        <button type="button" class="btn-secondary" (click)="onCancel()">Cancel</button>
+      } @else if (step() === 'preview') {
+        <button type="button" class="btn-secondary" (click)="backToSetup()">
+          <ng-icon name="reiconArrowLeft2" size="16" />
+          Back
+        </button>
+        <button
+          type="button"
+          class="btn-primary"
+          [disabled]="!preview()?.readyRows"
+          (click)="confirmUpload()"
+        >
+          Apply {{ preview()?.readyRows ?? 0 }}
+          {{ preview()?.readyRows === 1 ? 'change' : 'changes' }}
+        </button>
+      } @else {
+        <button type="button" class="btn-primary" (click)="onCancel()">Close</button>
+      }
+    </footer>
+  </div>
+</div>

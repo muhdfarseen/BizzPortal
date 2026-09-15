@@ -1,53 +1,49 @@
 import { AssessmentExam, TraineeAssessment, TraineeLookup, isValidScore } from './assessment.model';
+import {
+  SheetCell,
+  SheetColumn,
+  SheetIssue,
+  cellText,
+  columnIndex,
+  isBlankRow,
+  missingColumns,
+  sheetNumbers,
+  toCsv,
+} from './sheet.model';
 
 /**
  * Bulk score upload: the template admins download, the sheet they send back and
  * the validation that runs on it before anything is imported.
  *
  * Everything here is pure — file reading lives in `AssessmentUploadService` — so
- * the parsing and the rules can be unit-tested without a DOM or an upload.
+ * the parsing and the rules can be unit-tested without a DOM or an upload. Reading
+ * the file at all — CSV parsing, Excel detection, column lookup — is shared with
+ * the status sheet and lives in `sheet.model`.
  */
 
 /** The three columns of the upload template, in the order they are written. */
 export const TEMPLATE_HEADERS = ['Emp ID', 'Name', 'Score'] as const;
 
-/** Extensions the upload accepts, and the reader each one needs. */
-export const CSV_EXTENSIONS = ['.csv', '.txt'] as const;
-export const EXCEL_EXTENSIONS = ['.xlsx', '.xlsm'] as const;
-
-/** `value` for the file input's `accept` attribute. */
-export const SHEET_ACCEPT = [...CSV_EXTENSIONS, ...EXCEL_EXTENSIONS].join(',');
-
-/** Which reader a file needs, or `null` when the portal cannot read it. */
-export function sheetKind(fileName: string): 'csv' | 'excel' | null {
-  const name = fileName.toLowerCase();
-  if (CSV_EXTENSIONS.some((extension) => name.endsWith(extension))) {
-    return 'csv';
-  }
-  if (EXCEL_EXTENSIONS.some((extension) => name.endsWith(extension))) {
-    return 'excel';
-  }
-  return null;
-}
-
-/** A raw sheet cell, as handed over by either reader. */
-export type SheetCell = string | number | boolean | Date | null | undefined;
-
 /** One of the template's columns. */
 export type UploadColumn = 'employeeId' | 'name' | 'score';
 
-/** Names accepted for each column, so a renamed header still lands. */
-const COLUMN_ALIASES: Record<UploadColumn, readonly string[]> = {
-  employeeId: ['empid', 'emp id', 'employeeid', 'employee id', 'employee'],
-  name: ['name', 'trainee name', 'traineename', 'trainee'],
-  score: ['score', 'marks', 'mark'],
-};
-
-/** Every column the template needs, and a label to name it in an error. */
-const REQUIRED_COLUMNS: readonly { column: UploadColumn; label: string }[] = [
-  { column: 'employeeId', label: TEMPLATE_HEADERS[0] },
-  { column: 'name', label: TEMPLATE_HEADERS[1] },
-  { column: 'score', label: TEMPLATE_HEADERS[2] },
+/** Every column the template needs, its label and the names it answers to. */
+const REQUIRED_COLUMNS: readonly SheetColumn<UploadColumn>[] = [
+  {
+    column: 'employeeId',
+    label: TEMPLATE_HEADERS[0],
+    aliases: ['empid', 'emp id', 'employeeid', 'employee id', 'employee'],
+  },
+  {
+    column: 'name',
+    label: TEMPLATE_HEADERS[1],
+    aliases: ['name', 'trainee name', 'traineename', 'trainee'],
+  },
+  {
+    column: 'score',
+    label: TEMPLATE_HEADERS[2],
+    aliases: ['score', 'marks', 'mark'],
+  },
 ];
 
 /** Why a row cannot be imported. */
@@ -62,13 +58,6 @@ export type UploadErrorCode =
 /** Something worth showing but not worth blocking the row for. */
 export type UploadWarningCode = 'name-mismatch';
 
-/** One problem found on one row. */
-export interface UploadIssue<Code extends string> {
-  code: Code;
-  /** Sentence shown in the preview and written to the error CSV. */
-  message: string;
-}
-
 /** One sheet row after validation. */
 export interface UploadPreviewRow {
   /** Spreadsheet row number, with the header as row 1. */
@@ -82,8 +71,8 @@ export interface UploadPreviewRow {
   score: string;
   /** Level the score maps to, or `null` when the score is unusable. */
   cefr: string | null;
-  errors: readonly UploadIssue<UploadErrorCode>[];
-  warnings: readonly UploadIssue<UploadWarningCode>[];
+  errors: readonly SheetIssue<UploadErrorCode>[];
+  warnings: readonly SheetIssue<UploadWarningCode>[];
   /** Whether the row will be imported — true when it has no errors. */
   ok: boolean;
 }
@@ -104,34 +93,11 @@ export interface UploadPreview {
 /** The columns a sheet was found to carry, by position. */
 type ColumnMap = Record<UploadColumn, number>;
 
-/** Lower-cases a header and flattens its separators, so aliases can match. */
-function normalizeHeader(value: SheetCell): string {
-  return String(value ?? '')
-    .replace(/^[\s"']+|[\s"']+$/g, '')
-    .toLowerCase()
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ');
-}
-
-/** A cell as trimmed text; numbers keep their value, dates their ISO day. */
-function cellText(value: SheetCell): string {
-  if (value === null || value === undefined) {
-    return '';
-  }
-  if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
-  }
-  return String(value).trim();
-}
-
 /** Positions of the template columns in a header row, or `null` if any is missing. */
 function mapHeaderRow(headerRow: readonly SheetCell[]): ColumnMap | null {
-  const found = headerRow.map(normalizeHeader);
   const map = {} as ColumnMap;
-
-  for (const { column } of REQUIRED_COLUMNS) {
-    const aliases = COLUMN_ALIASES[column];
-    const index = found.findIndex((header) => aliases.includes(header));
+  for (const { column, aliases } of REQUIRED_COLUMNS) {
+    const index = columnIndex(headerRow, aliases);
     if (index === -1) {
       return null;
     }
@@ -140,121 +106,21 @@ function mapHeaderRow(headerRow: readonly SheetCell[]): ColumnMap | null {
   return map;
 }
 
-/** Labels of the template columns a header row does not carry. */
-function missingColumns(headerRow: readonly SheetCell[]): string[] {
-  const found = headerRow.map(normalizeHeader);
-  return REQUIRED_COLUMNS.filter(
-    ({ column }) => !found.some((header) => COLUMN_ALIASES[column].includes(header)),
-  ).map(({ label }) => label);
-}
-
-/** Whether a row holds nothing at all, and should be skipped rather than failed. */
-function isBlankRow(row: readonly SheetCell[]): boolean {
-  return row.every((cell) => cellText(cell) === '');
-}
+/** The spellings the Emp ID column answers to. */
+const EMPLOYEE_ID_ALIASES = ['empid', 'emp id', 'employeeid', 'employee id', 'employee'];
 
 /**
  * The distinct employee numbers a sheet names, ready for a lookup.
  *
- * Only numeric values are returned: the lookup takes numbers, so anything else
- * could not be resolved against the group anyway and is reported as an unknown
- * employee id by {@link validateUpload} instead. A sheet whose header cannot be
- * read names no ids, because there is no column to find them in.
+ * <p>A sheet that cannot be used names no ids: if a required column is missing there
+ * is nothing worth looking up, and asking the server about a sheet that is going to be
+ * refused anyway would be a wasted round trip.
  */
 export function sheetEmployeeIds(rows: readonly (readonly SheetCell[])[]): number[] {
-  if (rows.length === 0) {
+  if (rows.length === 0 || missingColumns(rows[0], REQUIRED_COLUMNS).length > 0) {
     return [];
   }
-  const map = mapHeaderRow(rows[0]);
-  if (!map) {
-    return [];
-  }
-
-  const ids = new Set<number>();
-  for (const [index, row] of rows.entries()) {
-    if (index === 0 || isBlankRow(row)) {
-      continue;
-    }
-    const value = Number(cellText(row[map.employeeId]));
-    if (Number.isInteger(value) && value > 0) {
-      ids.add(value);
-    }
-  }
-  return [...ids];
-}
-
-/**
- * Parses CSV text (RFC 4180): quoted fields may hold commas, newlines and
- * escaped `""` quotes, and both CRLF and LF end a record. A leading BOM is
- * dropped so the first header still matches.
- */
-export function parseCsv(text: string): string[][] {
-  const content = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = '';
-  let quoted = false;
-  let index = 0;
-
-  while (index < content.length) {
-    const char = content[index];
-
-    if (quoted) {
-      if (char === '"') {
-        if (content[index + 1] === '"') {
-          field += '"';
-          index += 2;
-          continue;
-        }
-        quoted = false;
-        index += 1;
-        continue;
-      }
-      field += char;
-      index += 1;
-      continue;
-    }
-
-    if (char === '"') {
-      quoted = true;
-      index += 1;
-      continue;
-    }
-    if (char === ',') {
-      row.push(field);
-      field = '';
-      index += 1;
-      continue;
-    }
-    if (char === '\r' || char === '\n') {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = '';
-      index += char === '\r' && content[index + 1] === '\n' ? 2 : 1;
-      continue;
-    }
-
-    field += char;
-    index += 1;
-  }
-
-  // Trailing newline means the last record is already complete.
-  if (field !== '' || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows;
-}
-
-/** Quotes a CSV cell only when it needs it. */
-function csvCell(value: string): string {
-  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-}
-
-/** Writes a matrix as CSV with CRLF records, which Excel reads back cleanly. */
-export function toCsv(rows: readonly (readonly string[])[]): string {
-  return rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
+  return sheetNumbers(rows, EMPLOYEE_ID_ALIASES);
 }
 
 /**
@@ -340,7 +206,7 @@ export function validateUpload(options: ValidateUploadOptions): UploadPreview {
     return { ...EMPTY_PREVIEW, sheetError: 'The file is empty.' };
   }
 
-  const missing = missingColumns(rows[0]);
+  const missing = missingColumns(rows[0], REQUIRED_COLUMNS);
   if (missing.length > 0) {
     return {
       ...EMPTY_PREVIEW,
@@ -363,8 +229,8 @@ export function validateUpload(options: ValidateUploadOptions): UploadPreview {
     const name = cellText(row[map.name]);
     const scoreText = cellText(row[map.score]);
     const trainee = byEmployeeId.get(employeeId) ?? null;
-    const errors: UploadIssue<UploadErrorCode>[] = [];
-    const warnings: UploadIssue<UploadWarningCode>[] = [];
+    const errors: SheetIssue<UploadErrorCode>[] = [];
+    const warnings: SheetIssue<UploadWarningCode>[] = [];
 
     if (employeeId === '') {
       errors.push({ code: 'missing-empid', message: 'Emp ID is missing.' });

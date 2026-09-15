@@ -1,10 +1,10 @@
 package com.bizzskill.portal.dashboard.service;
 
-import com.bizzskill.portal.assessment.entity.AppLapRemedial;
-import com.bizzskill.portal.assessment.repository.AppLapRemedialRepository;
+import com.bizzskill.portal.assessment.entity.AppTraineeStatus;
+import com.bizzskill.portal.assessment.repository.AppTraineeStatusRepository;
 import com.bizzskill.portal.assessment.service.TraineeScopeService;
-import com.bizzskill.portal.common.enums.LapStatus;
-import com.bizzskill.portal.common.enums.LapTrack;
+import com.bizzskill.portal.common.enums.StatusState;
+import com.bizzskill.portal.common.enums.TraineeStatus;
 import com.bizzskill.portal.dashboard.dto.DashboardSummaryResponse;
 import com.bizzskill.portal.dashboard.dto.DashboardSummaryResponse.LocationBreakdown;
 import com.bizzskill.portal.dashboard.dto.DashboardSummaryResponse.Totals;
@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
  * leak the size of groups a user cannot open.
  *
  * <p>Five queries regardless of the organisation's size — participants, their
- * batches, the locations, and their open tracks.
+ * batches, the locations, and the statuses their trainees hold.
  */
 @Service
 @Transactional(readOnly = true)
@@ -44,17 +44,17 @@ public class DashboardService {
     private final TraineeScopeService scope;
     private final BatchRepository batches;
     private final BizLocationRepository locations;
-    private final AppLapRemedialRepository lapRemedial;
+    private final AppTraineeStatusRepository traineeStatuses;
 
     public DashboardService(
             TraineeScopeService scope,
             BatchRepository batches,
             BizLocationRepository locations,
-            AppLapRemedialRepository lapRemedial) {
+            AppTraineeStatusRepository traineeStatuses) {
         this.scope = scope;
         this.batches = batches;
         this.locations = locations;
-        this.lapRemedial = lapRemedial;
+        this.traineeStatuses = traineeStatuses;
     }
 
     /**
@@ -72,19 +72,31 @@ public class DashboardService {
                 .toList();
 
         if (trainees.isEmpty()) {
-            return new DashboardSummaryResponse(new Totals(0, 0, 0, 0, 0), List.of());
+            return new DashboardSummaryResponse(new Totals(0, 0, 0, 0, 0, 0, 0), List.of());
         }
 
         Map<Long, Batch> batchesById = loadBatches(trainees);
         Map<String, String> locationNames = loadLocationNames();
-        Tracks tracks = loadTracks(trainees);
+        Statuses statuses = loadStatuses(trainees);
 
-        int remedial = tracks.remedial().size();
-        int lap = tracks.lap().size();
+        int remedial = statuses.with(TraineeStatus.REMEDIAL).size();
+        int lap = statuses.with(TraineeStatus.LAP).size();
+        int cleared = statuses.with(TraineeStatus.CLEARED).size();
+        int others = statuses.exits().size();
 
         return new DashboardSummaryResponse(
-                new Totals(trainees.size(), batchesById.size(), trainees.size() - remedial - lap, remedial, lap),
-                breakdown(trainees, batchesById, locationNames, tracks));
+                new Totals(
+                        trainees.size(),
+                        batchesById.size(),
+                        // Everyone holding no status at all. Derived rather than
+                        // counted separately, so the five figures cannot drift from
+                        // the total.
+                        trainees.size() - remedial - lap - cleared - others,
+                        remedial,
+                        lap,
+                        cleared,
+                        others),
+                breakdown(trainees, batchesById, locationNames, statuses));
     }
 
     // ── Internals ───────────────────────────────────────────────────────────
@@ -111,30 +123,21 @@ public class DashboardService {
     }
 
     /**
-     * The employee numbers currently on each track.
+     * The employee numbers currently holding each status.
      *
-     * <p>Only open placements count: a trainee whose track was closed is back to
-     * regular, which is what the Remedial and LAP tables show too.
+     * <p>Only current rows count: a superseded status is history, and the trainee
+     * has moved on from it — to another status, or to none at all.
      */
-    private Tracks loadTracks(List<Participant> trainees) {
+    private Statuses loadStatuses(List<Participant> trainees) {
         List<Long> employeeIds = trainees.stream().map(Participant::getIntEmployeeId).toList();
 
-        Map<Long, LapTrack> byEmployee = new LinkedHashMap<>();
-        for (AppLapRemedial placement :
-                lapRemedial.findByIntEmployeeIdInAndTxtStatus(employeeIds, LapStatus.OPEN)) {
-            byEmployee.put(placement.getIntEmployeeId(), placement.getTxtTrack());
+        Map<Long, TraineeStatus> byEmployee = new LinkedHashMap<>();
+        for (AppTraineeStatus period :
+                traineeStatuses.findByIntEmployeeIdInAndTxtState(employeeIds, StatusState.CURRENT)) {
+            byEmployee.put(period.getIntEmployeeId(), period.getTxtTraineeStatus());
         }
 
-        Set<Long> remedial = byEmployee.entrySet().stream()
-                .filter(entry -> entry.getValue() == LapTrack.REMEDIAL)
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toSet());
-        Set<Long> lap = byEmployee.entrySet().stream()
-                .filter(entry -> entry.getValue() == LapTrack.LAP)
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toSet());
-
-        return new Tracks(remedial, lap);
+        return new Statuses(byEmployee);
     }
 
     /**
@@ -147,7 +150,7 @@ public class DashboardService {
             List<Participant> trainees,
             Map<Long, Batch> batchesById,
             Map<String, String> locationNames,
-            Tracks tracks) {
+            Statuses statuses) {
 
         Map<String, List<Participant>> byLocation = new LinkedHashMap<>();
         for (Participant trainee : trainees) {
@@ -170,10 +173,10 @@ public class DashboardService {
                     .count();
 
             int remedialCount = (int) members.stream()
-                    .filter(member -> tracks.remedial().contains(member.getIntEmployeeId()))
+                    .filter(member -> statuses.holds(member.getIntEmployeeId(), TraineeStatus.REMEDIAL))
                     .count();
             int lapCount = (int) members.stream()
-                    .filter(member -> tracks.lap().contains(member.getIntEmployeeId()))
+                    .filter(member -> statuses.holds(member.getIntEmployeeId(), TraineeStatus.LAP))
                     .count();
 
             breakdown.add(new LocationBreakdown(
@@ -194,7 +197,34 @@ public class DashboardService {
         return breakdown;
     }
 
-    /** The employee numbers on each open track. */
-    private record Tracks(Set<Long> remedial, Set<Long> lap) {
+    /**
+     * The current status of every trainee in the selection, by employee number.
+     *
+     * <p>Absence from the map is meaningful: the trainee holds no status, which is
+     * the regular case and the largest group on most real rosters. Keeping it as a
+     * missing key rather than a stored value mirrors how the database records it.
+     */
+    private record Statuses(Map<Long, TraineeStatus> byEmployee) {
+
+        /** The employee numbers holding exactly this status. */
+        Set<Long> with(TraineeStatus status) {
+            return idsMatching(status::equals);
+        }
+
+        /** The employee numbers who left — discontinued, purged or resigned. */
+        Set<Long> exits() {
+            return idsMatching(TraineeStatus::isExit);
+        }
+
+        boolean holds(Long employeeId, TraineeStatus status) {
+            return status == byEmployee.get(employeeId);
+        }
+
+        private Set<Long> idsMatching(java.util.function.Predicate<TraineeStatus> wanted) {
+            return byEmployee.entrySet().stream()
+                    .filter(entry -> wanted.test(entry.getValue()))
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toSet());
+        }
     }
 }

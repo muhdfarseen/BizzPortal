@@ -17,8 +17,8 @@ export type Permission =
   | 'dashboard.view'
   | 'assessments.view'
   | 'assessments.edit'
-  | 'lap-remedial.view'
-  | 'lap-remedial.manage'
+  | 'trainee-status.view'
+  | 'trainee-status.manage'
   | 'reports.view'
   | 'users.manage'
   | 'configuration.manage';
@@ -60,14 +60,14 @@ export const PERMISSIONS: PermissionDefinition[] = [
     description: 'Enter and correct trainee scores and CEFR levels',
   },
   {
-    id: 'lap-remedial.view',
-    label: 'View LAP / Remedial',
-    description: 'See which trainees are on a LAP or Remedial track',
+    id: 'trainee-status.view',
+    label: 'View Trainee Status',
+    description: 'See the status each trainee currently holds',
   },
   {
-    id: 'lap-remedial.manage',
-    label: 'Manage LAP / Remedial',
-    description: 'Move trainees onto a track and close the tracks they complete',
+    id: 'trainee-status.manage',
+    label: 'Manage Trainee Status',
+    description: 'Change a trainee status and record the reason for the change',
   },
   {
     id: 'reports.view',
@@ -143,11 +143,16 @@ export const ROLES: RoleDefinition[] = [
   {
     id: 'faculty',
     label: 'Faculty',
-    description: 'Access to the assigned batches only. Records results but cannot manage tracks.',
+    description:
+      'Access to the assigned batches only. Records results and changes trainee status, one at a time or in bulk from a sheet.',
     scope: 'assigned-batches',
     requiresLocations: true,
     requiresBatches: true,
-    permissions: NON_ADMIN_PERMISSIONS.filter((permission) => permission !== 'lap-remedial.manage'),
+    // The whole non-admin set, trainee-status.manage included: faculty are the people
+    // who decide who needs remedial support, and both the Change status action and
+    // the bulk sheet depend on that permission. Migration V5 grants it for the same
+    // reason, so the two must stay in step.
+    permissions: NON_ADMIN_PERMISSIONS,
   },
 ];
 

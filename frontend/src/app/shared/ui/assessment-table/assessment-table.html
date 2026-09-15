@@ -85,6 +85,16 @@
               </td>
             }
 
+            @if (showStatus()) {
+              <td class="td-status">
+                @if (row.original.status; as status) {
+                  <span class="status-pill">{{ statusLabel(status) }}</span>
+                } @else {
+                  <span class="status-pill status-pill-regular">Regular</span>
+                }
+              </td>
+            }
+
             @if (showStartDate()) {
               <td class="td-start-date">
                 @if (row.original.startDate; as startDate) {

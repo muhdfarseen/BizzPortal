@@ -244,6 +244,31 @@
   white-space: nowrap;
 }
 
+/* ── Status column ──────────────────────────────────────────── */
+
+/* Only the Other tab asks for this column, and there it has to say which of the
+   three exits a trainee took, so the pill is coloured by how final it is rather
+   than by the status itself. */
+.td-status {
+  white-space: nowrap;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.0625rem 0.5rem;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-destructive) 10%, #ffffff);
+  color: var(--color-destructive);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.status-pill-regular {
+  background: var(--color-muted);
+  color: #475569;
+}
+
 /* ── Start date column ──────────────────────────────────────── */
 
 .td-start-date {
@@ -284,7 +309,7 @@
   color: var(--color-primary);
 }
 
-/* Text actions (the LAP / Remedial track moves). */
+/* Text actions (the one status change each row offers). */
 .row-action-text {
   padding: 0.3125rem 0.625rem;
   border-radius: var(--radius-md);

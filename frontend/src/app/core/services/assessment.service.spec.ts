@@ -135,7 +135,7 @@ describe('AssessmentService', () => {
     ]);
 
     const [trainee] = page.items;
-    expect(trainee.results['1']).toEqual({ score: 34, cefr: 'A2' });
+    expect(trainee.results['1']).toEqual({ score: 34, cefr: 'A2', assessedOn: null });
     expect(trainee.results['2']).toBeUndefined();
     expect(trainee.status).toBeUndefined();
     expect(page.page).toBe(0);
@@ -167,9 +167,9 @@ describe('AssessmentService', () => {
   it('ignores unknown exams and writes only scores to the API', () => {
     service
       .saveResults('41201', {
-        '1': { score: 88, cefr: 'C1' },
-        '3': { score: 44, cefr: 'A2' },
-        nope: { score: 50, cefr: 'B1' },
+        '1': { score: 88, cefr: 'C1', assessedOn: null },
+        '3': { score: 44, cefr: 'A2', assessedOn: null },
+        nope: { score: 50, cefr: 'B1', assessedOn: null },
       })
       .subscribe();
 
@@ -188,29 +188,31 @@ describe('AssessmentService', () => {
     request.flush(null, { status: 204, statusText: 'No Content' });
   });
 
-  it('records a track change with its remark and dates', () => {
+  it('records a status change with its remark and effective date', () => {
     service
-      .saveLapRemedial('41201', 'remedial', '  Weak pre-assessment  ', '2026-09-01')
+      .saveTraineeStatus('41201', 'remedial', '  Weak pre-assessment  ', '2026-09-01')
       .subscribe();
 
-    const request = http.expectOne(`${API_BASE}/assessments/trainees/41201/lap-remedial`);
+    const request = http.expectOne(`${API_BASE}/assessments/trainees/41201/trainee-status`);
     expect(request.request.method).toBe('PATCH');
     expect(request.request.body).toEqual({
       status: 'remedial',
       remark: 'Weak pre-assessment',
-      startDate: '2026-09-01',
+      effectiveDate: '2026-09-01',
     });
     request.flush(null, { status: 204, statusText: 'No Content' });
   });
 
-  it('closing a track records the close date without a start date', () => {
-    service.saveLapRemedial('41201', 'none', 'Track closed', undefined, '2026-11-20').subscribe();
+  it('ending a status sends regular, which is not a stored status', () => {
+    service
+      .saveTraineeStatus('41201', 'regular', 'No longer needs support.', '2026-11-20')
+      .subscribe();
 
-    const request = http.expectOne(`${API_BASE}/assessments/trainees/41201/lap-remedial`);
+    const request = http.expectOne(`${API_BASE}/assessments/trainees/41201/trainee-status`);
     expect(request.request.body).toEqual({
-      status: 'none',
-      remark: 'Track closed',
-      closeDate: '2026-11-20',
+      status: 'regular',
+      remark: 'No longer needs support.',
+      effectiveDate: '2026-11-20',
     });
     request.flush(null, { status: 204, statusText: 'No Content' });
   });

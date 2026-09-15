@@ -1,5 +1,10 @@
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
-import { LapRemedialStatus, TraineeAssessment } from '../../../../core/models/assessment.model';
+import {
+  StatusFilter,
+  TraineeAssessment,
+  TraineeStatusChange,
+  statusLabel,
+} from '../../../../core/models/assessment.model';
 import { DEFAULT_PAGE_SIZE, FIRST_PAGE, SortDirection } from '../../../../core/models/page.model';
 import { AssessmentService } from '../../../../core/services/assessment.service';
 import { AuthService } from '../../../../core/services/auth.service';
@@ -13,39 +18,63 @@ import {
   AssessmentTableComponent,
 } from '../../../../shared/ui/assessment-table/assessment-table';
 import {
-  LapRemedialChange,
-  LapRemedialChangeRequest,
-  LapRemedialDialogComponent,
-} from '../../../../shared/ui/lap-remedial-dialog/lap-remedial-dialog';
+  TraineeStatusDialogComponent,
+  TraineeStatusDialogRequest,
+  TraineeStatusSave,
+} from '../../../../shared/ui/trainee-status-dialog/trainee-status-dialog';
+import {
+  TraineeStatusUploadDialogComponent,
+  TraineeStatusUploadSave,
+} from '../../../../shared/ui/trainee-status-upload-dialog/trainee-status-upload-dialog';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { reiconSearchNormal2 } from '@ng-icons/reicon';
+import { reiconSearchNormal2, reiconUpload } from '@ng-icons/reicon';
 
-/** The track tabs of the page, in display order. */
-const TRACK_TABS: readonly { status: LapRemedialStatus; label: string }[] = [
-  { status: 'none', label: 'No LAP / Remedial' },
-  { status: 'remedial', label: 'Remedial' },
-  { status: 'lap', label: 'LAP' },
+/**
+ * The tabs of the page, in display order: the ordinary path first, then the
+ * outcome a trainee leaves by, then the three exits grouped as one.
+ */
+const STATUS_TABS: readonly StatusFilter[] = ['regular', 'remedial', 'lap', 'cleared', 'other'];
+
+/**
+ * The single row action, on every tab.
+ *
+ * One action rather than a different one per tab: the destination is a decision
+ * the user makes in the dialog, not one implied by which tab they happen to be
+ * looking at. "Move to LAP" on the Remedial tab could only ever escalate; this
+ * can also step someone back, clear them, or record that they left.
+ *
+ * Deliberately the quiet button treatment rather than the filled one: this button
+ * repeats on every row, so filling it would put a column of loud primary colour
+ * down the table and compete with the page's own actions. It reads as an option
+ * on the row and turns brand-coloured only when the pointer is over it.
+ */
+const CHANGE_STATUS_ACTION: readonly AssessmentRowAction[] = [
+  { id: 'change-status', label: 'Change status', variant: 'secondary' },
 ];
 
-/** Row actions offered on every row of a tab, keyed by the tab's track. */
-const TAB_ACTIONS: Record<LapRemedialStatus, readonly AssessmentRowAction[]> = {
-  none: [{ id: 'move-to-remedial', label: 'Move to Remedial', variant: 'primary' }],
-  remedial: [{ id: 'move-to-lap', label: 'Move to LAP', variant: 'primary' }],
-  lap: [{ id: 'close-lap', label: 'Close LAP', variant: 'secondary' }],
-};
-
-/** The track a row action moves a trainee onto. */
-const ACTION_TARGETS: Record<string, LapRemedialStatus> = {
-  'move-to-remedial': 'remedial',
-  'move-to-lap': 'lap',
-  'close-lap': 'none',
-};
-
 /** Guidance for a tab that holds no trainees. */
-const EMPTY_TAB_HINTS: Record<LapRemedialStatus, string> = {
-  none: 'No trainees without a LAP / Remedial track for this group.',
+const EMPTY_TAB_HINTS: Record<StatusFilter, string> = {
+  regular: 'No trainees are regular for this group.',
   remedial: 'No trainees are on Remedial for this group.',
   lap: 'No trainees are on LAP for this group.',
+  cleared: 'No trainees have cleared for this group.',
+  other: 'Nobody has discontinued, resigned or been purged in this group.',
+};
+
+/** How a tab is written on its button. */
+function tabLabel(tab: StatusFilter): string {
+  return tab === 'other' ? 'Other' : statusLabel(tab);
+}
+
+/** The sentence shown after a change, named from the destination. */
+const OUTCOMES: Record<TraineeStatusChange, string> = {
+  regular: 'Status ended — trainee is regular',
+  remedial: 'Moved to Remedial',
+  lap: 'Moved to LAP',
+  cleared: 'Marked as cleared',
+  discontinued: 'Marked as discontinued',
+  purged: 'Marked as purged',
+  resigned: 'Marked as resigned',
 };
 
 /**
@@ -59,27 +88,33 @@ const SORT_KEYS: Record<string, string> = {
 };
 
 /**
- * LAP / Remedial page: the filter bar, the track tabs and the trainees of the
+ * Trainee status page: the filter bar, the status tabs and the trainees of the
  * tab on screen.
  *
- * Trainees move along a track — none → remedial → lap — and every move is
- * confirmed in a dialog that records a remark. The remark given with a move is
- * what the destination tab's table shows, so each track knows why its trainees
- * arrived.
+ * The ordinary path runs regular → remedial → lap, and at any point a trainee can
+ * clear or leave. Any status can follow any other — the dialog is where that is
+ * decided, and it records the status, the day it takes effect and the reason in
+ * one action.
  *
- * Each tab is its own server-paged query: the track is sent as the `status`
- * filter, so the pager counts the tab rather than the whole group and the page
- * on screen is never a slice of something larger.
+ * Each tab is its own server-paged query: the tab is sent as the `status` filter,
+ * so the pager counts the tab rather than the whole group and the page on screen
+ * is never a slice of something larger.
  */
 @Component({
-  selector: 'app-lap-remedial',
+  selector: 'app-trainee-status',
   standalone: true,
-  imports: [FilterBarComponent, AssessmentTableComponent, LapRemedialDialogComponent, NgIcon],
-  providers: [provideIcons({ reiconSearchNormal2 })],
-  templateUrl: './lap-remedial.html',
-  styleUrl: './lap-remedial.css',
+  imports: [
+    FilterBarComponent,
+    AssessmentTableComponent,
+    TraineeStatusDialogComponent,
+    TraineeStatusUploadDialogComponent,
+    NgIcon,
+  ],
+  providers: [provideIcons({ reiconSearchNormal2, reiconUpload })],
+  templateUrl: './trainee-status.html',
+  styleUrl: './trainee-status.css',
 })
-export class LapRemedialComponent {
+export class TraineeStatusComponent {
   private readonly assessments = inject(AssessmentService);
   private readonly auth = inject(AuthService);
   private readonly toasts = inject(ToastService);
@@ -97,8 +132,11 @@ export class LapRemedialComponent {
     return this.exams().filter((exam) => selected.has(exam.id));
   });
 
-  /** The track tabs of the page, in display order. */
-  readonly trackTabs = TRACK_TABS;
+  /** The tabs of the page, in display order. */
+  readonly statusTabs = STATUS_TABS;
+
+  /** How a tab is written; `LAP` is an acronym and `other` reads better as Other. */
+  readonly tabLabel = tabLabel;
 
   /** Filter of the results on screen; `null` until the first search. */
   readonly searchedFilter = signal<FilterState | null>(null);
@@ -128,11 +166,11 @@ export class LapRemedialComponent {
   private readonly sort = signal<string | undefined>(undefined);
   private readonly direction = signal<SortDirection | undefined>(undefined);
 
-  /** The track tab on screen. */
-  readonly activeTab = signal<LapRemedialStatus>('none');
+  /** The status tab on screen. */
+  readonly activeTab = signal<StatusFilter>('regular');
 
-  /** The track change awaiting its confirmation dialog, if any. */
-  readonly confirming = signal<LapRemedialChangeRequest | null>(null);
+  /** The status change awaiting its confirmation dialog, if any. */
+  readonly confirming = signal<TraineeStatusDialogRequest | null>(null);
 
   private readonly resultsTable = viewChild(AssessmentTableComponent);
 
@@ -162,15 +200,26 @@ export class LapRemedialComponent {
   });
 
   /**
-   * Row actions of the visible tab: moving a trainee along the track needs
-   * `lap-remedial.manage`, so a role without it (Faculty) reads the tabs only.
+   * Row actions of the visible tab: changing a status needs
+   * `trainee-status.manage`, which every role that can reach this screen holds since
+   * migration V5 granted it to Faculty. The check stays rather than being dropped,
+   * because a role could still be configured without it.
    */
   readonly rowActions = computed<readonly AssessmentRowAction[]>(() =>
-    this.auth.has('lap-remedial.manage') ? TAB_ACTIONS[this.activeTab()] : [],
+    this.auth.has('trainee-status.manage') ? CHANGE_STATUS_ACTION : [],
   );
 
-  /** Whether the tab on screen shows the track columns: start date and remark. */
-  readonly showsTrackColumns = computed(() => this.activeTab() !== 'none');
+  /** Whether the tab on screen shows the status columns: start date and remark. */
+  readonly showsStatusColumns = computed(() => this.activeTab() !== 'regular');
+
+  /**
+   * Whether the tab on screen shows a status column.
+   *
+   * Only the Other tab needs one: it holds three different statuses, so the tab
+   * alone does not say which one a trainee is. On the other tabs every row carries
+   * the tab's own status, and repeating it in a column would be noise.
+   */
+  readonly showsStatusColumn = computed(() => this.activeTab() === 'other');
 
   /** Guidance for the tab on screen when it holds no trainees. */
   readonly emptyTabHint = computed(() => EMPTY_TAB_HINTS[this.activeTab()]);
@@ -256,7 +305,7 @@ export class LapRemedialComponent {
     this.loadTrainees(filter);
   }
 
-  selectTab(status: LapRemedialStatus): void {
+  selectTab(status: StatusFilter): void {
     if (status === this.activeTab()) {
       return;
     }
@@ -271,28 +320,33 @@ export class LapRemedialComponent {
   }
 
   onAction(event: AssessmentRowActionEvent): void {
-    const status = ACTION_TARGETS[event.action.id];
-    if (!status) {
+    if (event.action.id !== 'change-status') {
       return;
     }
-    this.confirming.set({ trainee: event.trainee, status, title: event.action.label });
+    this.confirming.set({ trainee: event.trainee });
   }
 
+  /** Whether the bulk sheet dialog is open. */
+  readonly uploading = signal(false);
+
+  /**
+   * Whether bulk upload is offered.
+   *
+   * <p>Guarded by the write permission, not the read one: reading a sheet changes
+   * nothing, but uploading one writes statuses, and the commit endpoint checks the
+   * same permission.
+   */
+  readonly canUpload = computed(() => this.auth.has('trainee-status.manage'));
+
   /** Records the confirmed change and refreshes the tab's data. */
-  onConfirm(change: LapRemedialChange): void {
+  onConfirm(change: TraineeStatusSave): void {
     const filter = this.searchedFilter();
     if (filter) {
       this.assessments
-        .saveLapRemedial(
-          change.employeeId,
-          change.status,
-          change.remark,
-          change.startDate,
-          change.closeDate,
-        )
+        .saveTraineeStatus(change.employeeId, change.status, change.remark, change.effectiveDate)
         .subscribe({
           next: () => {
-            this.toasts.success(LapRemedialComponent.outcomeFor(change.status));
+            this.toasts.success(OUTCOMES[change.status]);
             this.closeDialog();
             // The trainee has left the tab on screen, so its first page is read
             // again rather than patched: the row no longer belongs to it.
@@ -308,24 +362,43 @@ export class LapRemedialComponent {
     }
   }
 
-  closeDialog(): void {
-    this.confirming.set(null);
+  /** Opens the bulk sheet dialog. */
+  openUpload(): void {
+    this.uploading.set(true);
+  }
+
+  closeUpload(): void {
+    this.uploading.set(false);
   }
 
   /**
-   * The confirmation for a move.
+   * After a bulk upload, reloads only what could have changed.
    *
-   * Named from the destination rather than from `status`, because "none" is the
-   * API's word for closing a track and means nothing to the person who clicked.
+   * <p>The dialog is left open on its outcome step, which is where the user reads how
+   * many statuses were written and then closes it — the same shape the assessment
+   * upload has.
+   *
+   * <p>The sheet was generated for its own group and tab, which need not be the ones
+   * on screen: the dialog has its own filter bar. Reloading when they differ would
+   * replace the table the user is looking at with a query about something else, so the
+   * reload is limited to the case where the sheet covered what is on screen.
    */
-  private static outcomeFor(status: LapRemedialStatus): string {
-    switch (status) {
-      case 'remedial':
-        return 'Moved to Remedial';
-      case 'lap':
-        return 'Moved to LAP';
-      case 'none':
-        return 'Removed from LAP / Remedial';
+  onUploadSaved(save: TraineeStatusUploadSave): void {
+    const onScreen = this.searchedFilter();
+    const sameGroup =
+      onScreen !== null &&
+      onScreen.locationId === save.filter.locationId &&
+      onScreen.batchId === save.filter.batchId &&
+      onScreen.lgId === save.filter.lgId;
+
+    if (sameGroup && save.status === this.activeTab()) {
+      this.pageIndex.set(FIRST_PAGE);
+      this.loadTrainees(onScreen);
+      this.resultsTable()?.resetPage();
     }
+  }
+
+  closeDialog(): void {
+    this.confirming.set(null);
   }
 }

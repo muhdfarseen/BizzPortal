@@ -73,10 +73,10 @@ export class DashboardLayoutComponent {
       route: '/dashboard/assessments',
     },
     {
-      id: 'lap-remedial',
-      label: 'LAP / Remedial',
+      id: 'trainee-status',
+      label: 'Trainee Status',
       icon: 'reiconClipboard',
-      route: '/dashboard/lap-remedial',
+      route: '/dashboard/trainee-status',
     },
     { id: 'reports', label: 'Reports', icon: 'reiconChart', route: '/dashboard/reports' },
     {

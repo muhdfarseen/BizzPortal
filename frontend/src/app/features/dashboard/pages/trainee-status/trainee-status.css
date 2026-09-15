@@ -1,6 +1,6 @@
 /* ============================================================
-   LAP / Remedial — page shell (mirrors the assessment-results
-   section), the track tabs, and the results / empty states
+   Trainee status — page shell (mirrors the assessment-results
+   section), the status tabs, and the results / empty states
    ============================================================ */
 
 .page-shell {
@@ -17,6 +17,14 @@
   flex-wrap: wrap;
 }
 
+/* The title and the bulk sheet button, which sits beside it — the same heading the
+   assessment section carries its own upload button in. */
+.page-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .page-title {
   font-family: var(--font-heading);
   font-size: 1.5rem;
@@ -26,10 +34,35 @@
   line-height: 1.2;
 }
 
+.btn-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: #ffffff;
+  color: var(--color-foreground);
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.btn-upload:hover {
+  background: var(--color-secondary);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
 /* ── Track tabs ────────────────────────────────────────────── */
 
-/* A soft segmented control: the active track sits on a primary tint. */
-.track-tabs {
+/* A soft segmented control: the active tab sits on a primary tint. */
+.status-tabs {
   display: inline-flex;
   gap: 0.25rem;
   align-self: flex-start;
@@ -39,7 +72,7 @@
   background: var(--color-card);
 }
 
-.track-tab {
+.status-tab {
   padding: 0.4375rem 0.875rem;
   border: none;
   border-radius: var(--radius-md);
@@ -52,16 +85,16 @@
   white-space: nowrap;
 }
 
-.track-tab:hover {
+.status-tab:hover {
   color: var(--color-primary);
 }
 
-.track-tab.is-active {
+.status-tab.is-active {
   background: var(--color-primary-light);
   color: var(--color-primary);
 }
 
-.track-tab:focus-visible {
+.status-tab:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }

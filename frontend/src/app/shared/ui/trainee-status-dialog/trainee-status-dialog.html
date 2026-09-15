@@ -3,7 +3,7 @@
     class="modal-dialog"
     role="dialog"
     aria-modal="true"
-    aria-labelledby="lap-remedial-title"
+    aria-labelledby="trainee-status-title"
     (click)="$event.stopPropagation()"
   >
     <header class="modal-header">
@@ -12,7 +12,7 @@
           <ng-icon name="reiconArrowSwapHorizontal" size="20" />
         </span>
         <div>
-          <h2 id="lap-remedial-title" class="modal-title">{{ request().title }}</h2>
+          <h2 id="trainee-status-title" class="modal-title">Change status</h2>
           <p class="modal-subtitle">
             {{ request().trainee.name }} &bull; {{ request().trainee.employeeId }}
           </p>
@@ -25,11 +25,32 @@
     </header>
 
     <div class="modal-body">
-      <p class="confirm-text">{{ confirmText() }}</p>
+      <p class="current-status">
+        Currently <strong>{{ statusLabel(currentStatus()) }}</strong>
+      </p>
 
       <label class="field">
-        <span class="field-label">{{ dateLabel() }}</span>
-        <input type="date" class="date-input" [value]="date()" (input)="onDateInput($event)" />
+        <span class="field-label">New status</span>
+        <app-select
+          [options]="statusOptions()"
+          [value]="chosen()"
+          placeholder="Select status"
+          ariaLabel="New status"
+          (valueChange)="onStatusChange($event)"
+        />
+      </label>
+
+      <label class="field">
+        <span class="field-label">Effective date</span>
+        <input
+          type="date"
+          class="date-input"
+          [value]="effectiveDate()"
+          [attr.max]="latestEffectiveDate"
+          aria-label="Effective date"
+          (input)="onDateInput($event)"
+        />
+        <span class="field-hint">The day this trainee takes up the new status.</span>
       </label>
 
       <label class="field">
@@ -37,17 +58,21 @@
         <textarea
           class="remark-input"
           rows="3"
-          placeholder="Record why this change is being made"
+          placeholder="Record why the status is changing"
+          aria-label="Remark"
           [value]="remark()"
           (input)="onRemarkInput($event)"
         ></textarea>
+        <span class="field-hint">Recorded with the change, and shown in the table.</span>
       </label>
+
+      <p class="confirm-text">{{ confirmText() }}</p>
     </div>
 
     <footer class="modal-footer">
       <button type="button" class="btn-secondary" (click)="onCancel()">Cancel</button>
       <button type="button" class="btn-primary" [disabled]="!canConfirm()" (click)="onConfirm()">
-        {{ request().title }}
+        Change status
       </button>
     </footer>
   </div>

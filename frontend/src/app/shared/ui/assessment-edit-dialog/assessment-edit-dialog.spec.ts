@@ -8,6 +8,7 @@ import {
   TraineeAssessment,
   cefrBadge,
   cefrColor,
+  todayIsoDate,
 } from '../../../core/models/assessment.model';
 import { CefrMappingService } from '../../../core/services/cefr-mapping.service';
 import { flushStartup } from '../../../testing/api-testing';
@@ -23,8 +24,8 @@ const TRAINEE: TraineeAssessment = {
   employeeId: 'EMP-41207',
   name: 'Meera Nair',
   results: {
-    pre: { score: 64, cefr: 'B1' },
-    mid: { score: 58, cefr: 'B1' },
+    pre: { score: 64, cefr: 'B1', assessedOn: '2026-05-04' },
+    mid: { score: 58, cefr: 'B1', assessedOn: null },
   },
 };
 
@@ -188,7 +189,7 @@ describe('AssessmentEditDialogComponent', () => {
       {
         employeeId: 'EMP-41207',
         // Only `post` is sent: `pre` and `mid` already hold their scores.
-        results: { post: { score: 75, cefr: 'B2+' } },
+        results: { post: { score: 75, cefr: 'B2+', assessedOn: todayIsoDate() } },
       },
     ]);
   });
@@ -209,8 +210,8 @@ describe('AssessmentEditDialogComponent', () => {
     expect(fixture.componentInstance.saved[0]).toEqual({
       employeeId: 'EMP-41207',
       results: {
-        pre: { score: 92, cefr: 'C2' },
-        post: { score: 75, cefr: 'B2+' },
+        pre: { score: 92, cefr: 'C2', assessedOn: todayIsoDate() },
+        post: { score: 75, cefr: 'B2+', assessedOn: todayIsoDate() },
       },
     });
   });

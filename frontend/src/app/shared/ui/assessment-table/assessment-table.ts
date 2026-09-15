@@ -40,6 +40,7 @@ import {
   TraineeAssessment,
   cefrBadge,
   formatIsoDate,
+  statusLabel,
 } from '../../../core/models/assessment.model';
 import { DEFAULT_PAGE_SIZE, SortDirection } from '../../../core/models/page.model';
 import { CefrMappingService } from '../../../core/services/cefr-mapping.service';
@@ -74,10 +75,14 @@ const SEARCH_DEBOUNCE_MS = 300;
  */
 const PENDING_SCORE = -1;
 
-/** Builds the column definitions: identity, one column per configured exam, start date, remark, actions. */
+/**
+ * Builds the column definitions: identity, one per configured exam, then the
+ * optional status, start date, remark and action columns.
+ */
 function createColumns(
   exams: readonly AssessmentExam[],
   options: {
+    showStatus: boolean;
     showStartDate: boolean;
     showRemark: boolean;
     showActions: boolean;
@@ -119,13 +124,20 @@ function createColumns(
   }));
 
   // The start date of a trainee's current track is shown only while a LAP /
-  // Remedial track tab is on screen, so the column comes and goes with the
+  // Trainee status tab is on screen, so the column comes and goes with the
   // page's tabs.
   const startDateColumn: ColumnDef<AssessmentTableFeatures, TraineeAssessment>[] =
     options.showStartDate ? [{ id: 'startDate', header: 'Start Date', enableSorting: false }] : [];
 
-  // The remark a trainee arrived with is shown only while a LAP / Remedial
-  // track tab is on screen, so the column comes and goes with the page's tabs.
+  // The status a trainee holds. Only the Trainee status page's Other tab asks for
+  // it: elsewhere the tab already says which status every row carries, but that
+  // tab holds three different ones.
+  const statusColumn: ColumnDef<AssessmentTableFeatures, TraineeAssessment>[] = options.showStatus
+    ? [{ id: 'status', header: 'Status', enableSorting: false }]
+    : [];
+
+  // The remark a trainee arrived with is shown only while a Trainee status
+  // tab is on screen, so the column comes and goes with the page's tabs.
   const remarkColumn: ColumnDef<AssessmentTableFeatures, TraineeAssessment>[] = options.showRemark
     ? [{ id: 'remark', header: 'Remark', enableSorting: false }]
     : [];
@@ -135,7 +147,14 @@ function createColumns(
     ? [{ id: 'actions', header: 'Action', enableSorting: false }]
     : [];
 
-  return [...identityColumns, ...examColumns, ...startDateColumn, ...remarkColumn, ...actionColumn];
+  return [
+    ...identityColumns,
+    ...examColumns,
+    ...statusColumn,
+    ...startDateColumn,
+    ...remarkColumn,
+    ...actionColumn,
+  ];
 }
 
 /** A row-level action offered from every row's action cell. */
@@ -227,10 +246,16 @@ export class AssessmentTableComponent {
   /** Row actions rendered in every row's action cell. */
   readonly actions = input<readonly AssessmentRowAction[]>([]);
 
-  /** Whether rows show the start date of their current track (LAP / Remedial tracks). */
+  /** Whether rows show the day the trainee's current status began. */
+  /** Whether to render the status each trainee holds. */
+  readonly showStatus = input(false);
+
+  /** Exposed for the template, which writes `lap` as `LAP`. */
+  readonly statusLabel = statusLabel;
+
   readonly showStartDate = input(false);
 
-  /** Whether rows show the remark they arrived with (LAP / Remedial tracks). */
+  /** Whether rows show the reason the trainee holds their current status. */
   readonly showRemark = input(false);
 
   /** Zero-based index of the page on screen. */
@@ -296,6 +321,7 @@ export class AssessmentTableComponent {
 
   private readonly columns = computed(() =>
     createColumns(this.exams(), {
+      showStatus: this.showStatus(),
       showStartDate: this.showStartDate(),
       showRemark: this.showRemark(),
       showActions: this.actions().length > 0,
@@ -471,12 +497,15 @@ export class AssessmentTableComponent {
 
   /**
    * Tooltip of a result cell. The cell shows only the score and its CEFR pill,
-   * so the exam's maximum — and the reason an empty cell is empty — live here.
+   * so the exam's maximum, the date it was conducted, and the reason an empty
+   * cell is empty live here.
    */
   resultTitle(exam: AssessmentExam, result: AssessmentResult | undefined): string {
-    return result
-      ? `${exam.name}: ${result.score} out of ${exam.maxScore}`
-      : `${exam.name} not taken yet`;
+    if (!result) {
+      return `${exam.name} not taken yet`;
+    }
+    const conducted = result.assessedOn ? ` · conducted ${formatIsoDate(result.assessedOn)}` : '';
+    return `${exam.name}: ${result.score} out of ${exam.maxScore}${conducted}`;
   }
 
   /** Start date of a trainee's current track, formatted for display. */

@@ -8,16 +8,20 @@ import {
   reiconTickCircle,
   reiconUpload,
 } from '@ng-icons/reicon';
-import { AssessmentExam, CefrBadgeStyle, cefrBadge } from '../../../core/models/assessment.model';
 import {
-  SHEET_ACCEPT,
-  UploadPreview,
-  buildErrorCsv,
-} from '../../../core/models/assessment-upload.model';
+  AssessmentExam,
+  CefrBadgeStyle,
+  cefrBadge,
+  formatIsoDate,
+  todayIsoDate,
+} from '../../../core/models/assessment.model';
+import { UploadPreview, buildErrorCsv } from '../../../core/models/assessment-upload.model';
+import { SHEET_ACCEPT } from '../../../core/models/sheet.model';
 import { apiErrorMessage } from '../../../core/http/api-error';
 import { AssessmentUploadService } from '../../../core/services/assessment-upload.service';
 import { CefrMappingService } from '../../../core/services/cefr-mapping.service';
 import { FileDownloadService } from '../../../core/services/file-download.service';
+import { SheetReaderService } from '../../../core/services/sheet-reader.service';
 import { ToastService } from '../../../core/ui/toast.service';
 import { FilterBarComponent, FilterState } from '../../filter-bar/filter-bar';
 import { SelectComponent, SelectOption } from '../select/select';
@@ -80,6 +84,7 @@ export class AssessmentUploadDialogComponent {
   readonly cancelled = output<void>();
 
   private readonly uploads = inject(AssessmentUploadService);
+  private readonly reader = inject(SheetReaderService);
   private readonly files = inject(FileDownloadService);
   private readonly toasts = inject(ToastService);
   private readonly cefrMapping = inject(CefrMappingService);
@@ -94,6 +99,20 @@ export class AssessmentUploadDialogComponent {
   readonly imported = signal(0);
   readonly isReading = signal(false);
   readonly readError = signal<string | null>(null);
+
+  /**
+   * The date the exam was conducted, recorded against every row of the sheet.
+   *
+   * <p>Defaults to today, which is right for a sheet entered the same day, and is
+   * the field a user corrects when they are uploading yesterday's papers.
+   */
+  readonly assessedOn = signal(todayIsoDate());
+
+  /** Latest date the picker offers: an exam cannot have been conducted tomorrow. */
+  readonly latestAssessedOn = todayIsoDate();
+
+  /** The chosen date, written the way the rest of the portal writes dates. */
+  readonly conductedOnLabel = computed(() => formatIsoDate(this.assessedOn()));
 
   /** The group the sheet is uploaded for; `null` until the filter bar reports. */
   private readonly filter = signal<FilterState | null>(null);
@@ -113,7 +132,9 @@ export class AssessmentUploadDialogComponent {
   });
 
   /** Whether the template and the file picker are available yet. */
-  readonly canUseGroup = computed(() => this.groupReady() && this.selectedExam() !== null);
+  readonly canUseGroup = computed(
+    () => this.groupReady() && this.selectedExam() !== null && this.assessedOn() !== '',
+  );
 
   readonly rows = computed(() => this.preview()?.rows ?? []);
   readonly sheetError = computed(() => this.preview()?.sheetError ?? null);
@@ -130,6 +151,12 @@ export class AssessmentUploadDialogComponent {
 
   onExamChange(value: string | undefined): void {
     this.examId.set(value ?? '');
+  }
+
+  /** Records the date the group sat the exam. */
+  onAssessedOnChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.assessedOn.set(input.value);
   }
 
   /** Downloads the template for the selected group and assessment. */
@@ -160,7 +187,7 @@ export class AssessmentUploadDialogComponent {
     this.isReading.set(true);
     this.readError.set(null);
     try {
-      const sheet = await this.uploads.readSheet(file);
+      const sheet = await this.reader.read(file);
       this.fileName.set(file.name);
       this.preview.set(await firstValueFrom(this.uploads.preview(filter, exam.id, sheet)));
       this.step.set('preview');
@@ -196,12 +223,12 @@ export class AssessmentUploadDialogComponent {
     const filter = this.filter();
     const exam = this.selectedExam();
     const preview = this.preview();
-    if (!filter || !exam || !preview) {
+    if (!filter || !exam || !preview || !this.assessedOn()) {
       return;
     }
 
     this.readError.set(null);
-    this.uploads.commit(filter, exam.id, preview.rows).subscribe({
+    this.uploads.commit(filter, exam.id, preview.rows, this.assessedOn()).subscribe({
       next: (count) => {
         this.imported.set(count);
         this.step.set('done');

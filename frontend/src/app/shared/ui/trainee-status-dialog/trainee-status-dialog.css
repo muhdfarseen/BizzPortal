@@ -1,5 +1,5 @@
 /* ============================================================
-   LAP / Remedial Dialog — mirrors the portal modal styling
+   Trainee Status Dialog — mirrors the portal modal styling
    (see assessment-edit-dialog.css and dashboard-layout.css)
    ============================================================ */
 
@@ -149,6 +149,25 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #64748b;
+}
+
+.field-hint {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--color-muted-foreground);
+}
+
+/* What the trainee holds now, shown so the change has a visible starting point. */
+.current-status {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  color: var(--color-muted-foreground);
+}
+
+.current-status strong {
+  color: var(--color-foreground);
 }
 
 .remark-input,

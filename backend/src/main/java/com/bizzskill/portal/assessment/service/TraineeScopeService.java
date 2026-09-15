@@ -1,7 +1,7 @@
 package com.bizzskill.portal.assessment.service;
 
 import com.bizzskill.portal.assessment.repository.TraineeRosterSpecifications;
-import com.bizzskill.portal.common.enums.TrackFilter;
+import com.bizzskill.portal.common.enums.StatusFilter;
 import com.bizzskill.portal.common.error.NotFoundException;
 import com.bizzskill.portal.common.web.PageQuery;
 import com.bizzskill.portal.organization.entity.Batch;
@@ -81,6 +81,41 @@ public class TraineeScopeService {
     }
 
     /**
+     * The trainees of one status tab, in one group, narrowed to the caller's scope.
+     *
+     * <p>What a bulk sheet is generated from: the tab the user is looking at, whole
+     * rather than one page of it, because a sheet that covered only the visible page
+     * would silently leave most of the group unaccounted for.
+     *
+     * <p>Filtered by the same specification the table pages through, so "the Regular
+     * tab" means exactly the same set of trainees in the sheet as on screen, and
+     * ordered by name and then employee number so two trainees with the same name
+     * still come out in a stable order across downloads.
+     *
+     * @param status optional trainee status tab, or null for every trainee.
+     */
+    public List<Participant> find(
+            PortalPrincipal caller,
+            String locationId,
+            Long batchId,
+            Long lgId,
+            StatusFilter status) {
+
+        ResolvedScope resolved = resolve(caller, locationId, batchId, lgId);
+
+        Specification<Participant> spec =
+                TraineeRosterSpecifications.inScope(resolved.lgId(), resolved.batchIds());
+
+        Specification<Participant> byStatus = TraineeRosterSpecifications.hasStatus(status);
+        if (byStatus != null) {
+            spec = spec.and(byStatus);
+        }
+
+        return participants.findAll(
+                spec, Sort.by(Sort.Order.asc("txtParticipantName"), Sort.Order.asc("intEmployeeId")));
+    }
+
+    /**
      * One page of trainees, narrowed to the caller's scope and to the given filters.
      *
      * <p>The sibling of {@link #find} for screens that page. The scope rules are
@@ -97,7 +132,7 @@ public class TraineeScopeService {
      * @param batchId    optional batch id; takes precedence over the location.
      * @param lgId       optional learning group id; takes precedence over both.
      * @param paging     the requested page and search text.
-     * @param track      optional LAP / Remedial filter, or null for every trainee.
+     * @param status     optional trainee status filter, or null for every trainee.
      * @param sort       the order pages are cut from; must be a total order.
      */
     public Page<Participant> page(
@@ -106,7 +141,7 @@ public class TraineeScopeService {
             Long batchId,
             Long lgId,
             PageQuery paging,
-            TrackFilter track,
+            StatusFilter status,
             Sort sort) {
 
         ResolvedScope resolved = resolve(caller, locationId, batchId, lgId);
@@ -118,9 +153,9 @@ public class TraineeScopeService {
             spec = spec.and(search);
         }
 
-        Specification<Participant> onTrack = TraineeRosterSpecifications.onTrack(track);
-        if (onTrack != null) {
-            spec = spec.and(onTrack);
+        Specification<Participant> byStatus = TraineeRosterSpecifications.hasStatus(status);
+        if (byStatus != null) {
+            spec = spec.and(byStatus);
         }
 
         return participants.findAll(spec, paging.toPageRequest(sort));

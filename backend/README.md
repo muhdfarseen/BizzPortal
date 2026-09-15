@@ -2,7 +2,7 @@
 
 Spring Boot + PostgreSQL backend for the BizzSkill Portal frontend.
 
-It owns the assessment configuration, results, CEFR mapping and LAP/Remedial data,
+It owns the assessment configuration, results, CEFR mapping and trainee status data,
 and **reads** the training organisation (locations, batches, learning groups,
 participants) from the tables owned by the existing technical assessment portal.
 
@@ -158,7 +158,12 @@ Four roles ship as reference data, mirroring the frontend:
 | `superadmin` | all | all 8 |
 | `program-manager` | all | all but `users.manage`, `configuration.manage` |
 | `location-admin` | assigned-locations | as above |
-| `faculty` | assigned-batches | as above, minus `lap-remedial.manage` |
+| `faculty` | assigned-batches | as above |
+
+Faculty holds `trainee-status.manage` as well: a faculty member is who notices that a
+trainee needs remedial teaching, and routing that through an administrator would
+leave the record trailing the decision by days. `assigned-batches` is what keeps it
+honest — the permission reaches only the groups the caller is assigned to.
 
 ---
 
@@ -169,7 +174,7 @@ com.bizzskill.portal
 ├── auth/           sign-in, token issuing                     (dto · service · web)
 ├── organization/   the portal hierarchy, scoped reads         (entity · repository · dto · service · web)
 ├── user/           accounts, roles, permissions               (entity · repository)
-├── assessment/     assessments, CEFR bands, results, LAP      (entity · repository)
+├── assessment/     assessments, CEFR bands, results, status   (entity · repository)
 ├── security/       token service, principal, password encoder
 ├── config/         security, JPA auditing, demo seed
 └── common/         audit base class, enums, error model
@@ -220,9 +225,10 @@ Returns Location → Batch → LG, already narrowed to the caller's scope.
 
 Headline counters and a per-location breakdown, counted server-side so the
 dashboard can never disagree with the assessment tables, and narrowed to the
-caller's scope for the same reason the roster is. `regular + remedial + lap`
-always equals the trainee count: a trainee is on at most one track, and the
-regular figure is derived rather than counted so that stays true by construction.
+caller's scope for the same reason the roster is. `regular + remedial + lap +
+cleared + others` always equals the trainee count: a trainee holds at most one
+status, and the regular figure is derived rather than counted so that stays true
+by construction.
 
 ### Configuration
 
@@ -256,13 +262,105 @@ did not supply one. No other response has a field for it.
 |---|---|---|
 | `GET` | `/api/assessments/trainees` | `assessments.view` |
 | `PATCH` | `/api/assessments/trainees/{employeeId}` | `assessments.edit` |
-| `PATCH` | `/api/assessments/trainees/{employeeId}/lap-remedial` | `lap-remedial.manage` |
+| `PATCH` | `/api/assessments/trainees/{employeeId}/trainee-status` | `trainee-status.manage` |
 | `GET` | `/api/assessments/uploads/template` | `assessments.view` |
 | `POST` | `/api/assessments/uploads` | `assessments.edit` |
+| `GET` | `/api/assessments/trainee-status/uploads/template` | `trainee-status.view` |
+| `POST` | `/api/assessments/trainee-status/uploads/lookup` | `trainee-status.view` |
+| `POST` | `/api/assessments/trainee-status/uploads` | `trainee-status.manage` |
 
 Filter the roster with `?locationId=`, `?batchId=` and `?lgId=`; each narrows
 further than the last. Score entry accepts a map keyed by assessment id, so a
 table can save only the cell that changed, and `{"score": null}` clears a result.
+
+`PATCH .../trainee-status` is the one place a trainee's status changes. It takes
+`{status, remark, effectiveDate}` and answers `204`; see *Trainee status* below for
+what it does with them. `POST .../trainee-status/uploads` writes through that same
+service, so it is a second way in rather than a second writer.
+
+The bulk commit takes an `assessedOn` date — the day the group sat the exam, one
+date for the whole sheet, since a sheet is routinely uploaded after the fact. It
+is required and cannot be in the future, and it is stored against every row as
+`app_assessment_result.dateassessed_on`; the roster returns it alongside each
+score. Inline score entry records the day it was keyed in, which is the same
+column.
+
+### Trainee status
+
+A trainee's status is the row in `app_trainee_status` flagged `txtstate = 'A'`.
+There is at most one such row per trainee — a partial unique index says so, which
+is also what makes two simultaneous changes safe rather than merely unlikely.
+
+`regular` is never stored. Holding no status *is* being regular, which is why the
+roster reports `status` only for a trainee who holds one and the dashboard derives
+the regular count by subtraction.
+
+A change supersedes the current row rather than editing it: the old row becomes
+`txtstate = 'C'` with `dateclose_date` set to the new status's start date, and a new
+current row is inserted. History is therefore complete — the roster returns the
+most recent superseded period's close date and remark for a trainee who holds
+nothing, so the table can still say when they left a status and why. The remark on
+the superseded row is kept, so each period keeps the reason it *began*.
+
+The stored vocabulary is `remedial`, `lap`, `cleared`, `discontinued`, `purged` and
+`resigned`, each enforced by a check constraint. The tabs group them: `regular`
+(no current row), `remedial`, `lap`, `cleared`, and `other` (any of the three
+exits). `cleared` is a successful outcome and is terminal in intent, but nothing
+enforces that — the ordinary path runs regular → remedial → lap, and any status may
+follow any other. The remark is what records why someone went backwards.
+
+Rules the service enforces, and the status it answers with:
+
+| Situation | Answer |
+|---|---|
+| Blank or missing `remark` | `400`, `fieldErrors[0].field = "remark"` |
+| Unknown status code | `400`, `fieldErrors[0].field = "status"` |
+| `effectiveDate` in the future | `400`, `fieldErrors[0].field = "effectiveDate"` |
+| `effectiveDate` before the current status began | `400`, naming the earliest usable date |
+| Trainee already holds that status | `422` |
+| Ending a status for a regular trainee | `422` |
+| Trainee outside the caller's scope | `403` |
+| Someone else changed the status first | `409` |
+
+The future-date check allows one day of UTC slack: for a user in IST, "today" is
+already tomorrow in UTC, and refusing their own date would be a bug they could not
+work around. Reporting a status the trainee already holds as `422` rather than as a
+silent no-op is deliberate — the request carried a typed remark, and discarding it
+without saying so is worse than refusing it.
+
+#### Changing many at once
+
+`GET .../trainee-status/uploads/template` builds a sheet for **one tab of one
+group** — the tab is a required `status` parameter, so a sheet for Regular holds
+only the trainees who are regular. The columns are:
+
+```
+Emp ID, Name, <one column per assessment asked for>, Current Status, New Status, Effective Date, Remark
+```
+
+The assessment columns are named `examIds`, repeated once per paper, and each cell
+holds the mark as the screen shows it — `51 - B1`, the score and the CEFR level it
+resolved to. A trainee who did not sit the paper has a blank cell. None of this is
+read back: `Name`, the marks and `Current Status` exist so the person filling the
+sheet can see the evidence for the decision in front of them, and the server
+ignores all three on the way in. That is the point of the feature — the sheet is a
+worksheet, not a data transfer.
+
+`POST .../trainee-status/uploads` takes `{locationId, batchId, lgId, rows}`, where
+each row is `{employeeId, status, remark, effectiveDate}`, all required but
+`effectiveDate` — a blank date means today, exactly as the single change does. The
+upload is **all-or-nothing**: every row is validated against the same rules the
+single change applies before any of them is written, and a failure anywhere refuses
+the whole sheet with row-addressed violations (`rows[3].status`), so a sheet is
+never half-applied. The writes then go through `TraineeStatusService.save`, the same
+method `PATCH` uses; the bulk endpoint is a second way in, not a second writer.
+
+The client cannot validate the "what does this trainee hold now" rules on its own,
+so `POST .../trainee-status/uploads/lookup` answers them: given the employee ids a
+sheet names, it returns each one's current status and the day it began. That is what
+lets the preview say "41202 already holds Remedial" before anything is sent to be
+written — and it is scoped like every other read, so it cannot be used to ask about
+another batch's trainees.
 
 ### Errors
 
@@ -293,14 +391,14 @@ cd backend
 mvn test
 ```
 
-70 tests, no Docker required — the integration suite runs against a real
+137 tests, no Docker required — the integration suite runs against a real
 PostgreSQL database (`bizzskill_portal_test`, created by the same migrations
 production uses).
 
 | Suite | Covers |
 |---|---|
 | `CefrMappingServiceTest` | the published Versant boundaries, the 76 overlap, the out-of-range fallback, and mapping validation |
-| `PortalApiIntegrationTest` | sign-in and its failure modes, token rejection, role scoping, score entry and its audit trail, the all-or-nothing upload, user-management guard rails, the dashboard summary and its scoping, and the not-found and wrong-method responses |
+| `PortalApiIntegrationTest` | sign-in and its failure modes, token rejection, role scoping, score entry and its audit trail, the all-or-nothing upload, every trainee-status transition and its refusals, user-management guard rails, the dashboard summary and its scoping, and the not-found and wrong-method responses |
 
 Two choices worth knowing about:
 

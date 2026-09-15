@@ -1,5 +1,7 @@
 package com.bizzskill.portal.assessment.dto;
 
+import java.time.LocalDate;
+
 /**
  * One scored exam on a trainee's row.
  *
@@ -12,6 +14,10 @@ package com.bizzskill.portal.assessment.dto;
  *              audit trail, but the badge's colour comes from the current mapping,
  *              so returning a stale level would colour the badge wrongly after an
  *              administrator edits the bands.
+ * @param assessedOn the date the exam was conducted, or null for rows written
+ *              before the portal recorded one. Read from the stored column rather
+ *              than recomputed, because unlike the level it is a fact about the
+ *              past that nothing can re-derive.
  */
-public record TraineeResultResponse(Integer score, String cefr) {
+public record TraineeResultResponse(Integer score, String cefr, LocalDate assessedOn) {
 }

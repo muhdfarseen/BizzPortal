@@ -43,6 +43,7 @@ export interface SelectOption {
   ],
   host: {
     '[attr.aria-label]': 'ariaLabel() || null',
+    '(keydown.escape)': 'keepEscapeWhileOpen($event)',
   },
   imports: [NgIcon, NgpSelectDropdown, NgpSelectOption, NgpSelectPortal],
   providers: [provideIcons({ reiconChevronDown })],
@@ -61,6 +62,21 @@ export class SelectComponent {
 
   /** The accessible label for the trigger. */
   readonly ariaLabel = input('');
+
+  /**
+   * Keeps Escape from reaching the document while the dropdown is open.
+   *
+   * Every modal in the portal dismisses itself on `document:keydown.escape`, so
+   * without this, Escape aimed at the dropdown would close the modal around it
+   * and discard whatever the user had typed in there. The dropdown keeps the key
+   * only while it is open: with the list closed, Escape still closes the modal,
+   * which is what a user in a select expects.
+   */
+  protected keepEscapeWhileOpen(event: Event): void {
+    if (this.state().open()) {
+      event.stopPropagation();
+    }
+  }
 
   /** Whether the current value matches a selectable option. */
   protected readonly hasValue = computed(() => {

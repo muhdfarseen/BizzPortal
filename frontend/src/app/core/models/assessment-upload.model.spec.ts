@@ -3,10 +3,7 @@ import {
   UploadPreview,
   buildErrorCsv,
   buildTemplateCsv,
-  parseCsv,
   sheetEmployeeIds,
-  sheetKind,
-  toCsv,
   validateUpload,
 } from './assessment-upload.model';
 
@@ -14,7 +11,11 @@ const EXAM: AssessmentExam = { id: 'pre', name: 'Pre', maxScore: 90 };
 
 const ROSTER: readonly TraineeAssessment[] = [
   { employeeId: 'EMP-1', name: 'Aarav Nair', results: {} },
-  { employeeId: 'EMP-2', name: 'Meera Iyer', results: { pre: { score: 60, cefr: 'B2' } } },
+  {
+    employeeId: 'EMP-2',
+    name: 'Meera Iyer',
+    results: { pre: { score: 60, cefr: 'B2', assessedOn: null } },
+  },
   { employeeId: 'EMP-3', name: 'Rahul Das', results: {} },
 ];
 
@@ -38,58 +39,6 @@ function validate(rows: readonly (readonly string[])[], group: TraineeLookup = G
 }
 
 const HEADER = ['Emp ID', 'Name', 'Score'];
-
-describe('parseCsv', () => {
-  it('reads records separated by CRLF or LF', () => {
-    expect(parseCsv('a,b\r\nc,d')).toEqual([
-      ['a', 'b'],
-      ['c', 'd'],
-    ]);
-    expect(parseCsv('a,b\nc,d')).toEqual([
-      ['a', 'b'],
-      ['c', 'd'],
-    ]);
-  });
-
-  it('keeps commas and newlines inside quoted fields', () => {
-    expect(parseCsv('"a,1",b')).toEqual([['a,1', 'b']]);
-    expect(parseCsv('"line1\nline2",b')).toEqual([['line1\nline2', 'b']]);
-  });
-
-  it('unescapes doubled quotes', () => {
-    expect(parseCsv('"say ""hi""",b')).toEqual([['say "hi"', 'b']]);
-  });
-
-  it('drops a leading BOM so the first header still matches', () => {
-    expect(parseCsv('\uFEFFa,b')).toEqual([['a', 'b']]);
-  });
-
-  it('does not add a row for a trailing newline', () => {
-    expect(parseCsv('a,b\n')).toEqual([['a', 'b']]);
-  });
-});
-
-describe('sheetKind', () => {
-  it('recognises the CSV and Excel extensions in any case', () => {
-    expect(sheetKind('scores.csv')).toBe('csv');
-    expect(sheetKind('SCORES.CSV')).toBe('csv');
-    expect(sheetKind('scores.xlsx')).toBe('excel');
-    expect(sheetKind('scores.xlsm')).toBe('excel');
-  });
-
-  it('rejects anything else', () => {
-    expect(sheetKind('scores.pdf')).toBeNull();
-    expect(sheetKind('scores')).toBeNull();
-  });
-});
-
-describe('toCsv', () => {
-  it('quotes only the cells that need it', () => {
-    expect(toCsv([['a', 'b']])).toBe('a,b');
-    expect(toCsv([['a,1', 'b']])).toBe('"a,1",b');
-    expect(toCsv([['say "hi"', 'b']])).toBe('"say ""hi""",b');
-  });
-});
 
 describe('buildTemplateCsv', () => {
   it('prefills the group with each trainee’s current score', () => {

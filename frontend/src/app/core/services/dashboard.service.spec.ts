@@ -6,7 +6,7 @@ import { DashboardService, DashboardSummary } from './dashboard.service';
 
 /** The summary the running backend answers with after the demo seed. */
 const SUMMARY: DashboardSummary = {
-  totals: { trainees: 14, batches: 5, regular: 12, remedial: 1, lap: 1 },
+  totals: { trainees: 14, batches: 5, regular: 11, remedial: 1, lap: 1, cleared: 1, others: 0 },
   locations: [
     {
       locationId: 'BLR',
@@ -105,11 +105,13 @@ describe('DashboardService', () => {
     expect(service.summary().totals.trainees).toBe(14);
   });
 
-  it('keeps the track counts exhaustive', () => {
-    // regular + remedial + lap must always equal the trainee count, because a
-    // trainee is on at most one track.
+  it('keeps the status counts exhaustive', () => {
+    // The five figures must always add up to the trainee count, because a trainee
+    // holds at most one status and holding none is the regular case.
     const totals = SUMMARY.totals;
 
-    expect(totals.regular + totals.remedial + totals.lap).toBe(totals.trainees);
+    expect(totals.regular + totals.remedial + totals.lap + totals.cleared + totals.others).toBe(
+      totals.trainees,
+    );
   });
 });

@@ -8,9 +8,11 @@ import {
   AssessmentFilter,
   AssessmentResult,
   DEFAULT_MAX_SCORE,
-  LapRemedialStatus,
+  StatusFilter,
   TraineeAssessment,
   TraineeLookup,
+  TraineeStatus,
+  TraineeStatusChange,
 } from '../models/assessment.model';
 import { Page, PagedQuery, pagedParams } from '../models/page.model';
 import { CefrMappingService } from './cefr-mapping.service';
@@ -42,6 +44,8 @@ export interface AssessmentConfigEntry {
 interface ApiTraineeResult {
   score: number | null;
   cefr?: string | null;
+  /** ISO date the exam was conducted, absent on rows recorded before it was kept. */
+  assessedOn?: string | null;
 }
 
 /** A trainee row as `GET /api/assessments/trainees` returns it. */
@@ -68,13 +72,13 @@ interface ApiTraineeLookup {
 }
 
 /**
- * The roster query, which adds the LAP / Remedial tab to the shared paging
+ * The roster query, which adds the Trainee status tab to the shared paging
  * inputs: the tab is a server-side filter, so it belongs with `search` rather
  * than with the group the page is scoped to.
  */
 export interface TraineeQuery extends PagedQuery {
-  /** Keeps only trainees on this track; omit for every track. */
-  status?: LapRemedialStatus;
+  /** Keeps only trainees on this tab; omit for every trainee. */
+  status?: StatusFilter;
 }
 
 /** Adds only the narrowing parameters the filter actually sets. */
@@ -99,7 +103,7 @@ function filterParams(filter: AssessmentFilter): HttpParams {
  * - {@link getTrainees}  ← `GET /api/assessments/trainees?locationId=…`
  * - {@link lookupTrainees} → `POST /api/assessments/trainees/lookup`
  * - {@link saveResults}  → `PATCH /api/assessments/trainees/:employeeId`
- * - {@link saveLapRemedial} → `PATCH /api/assessments/trainees/:employeeId/lap-remedial`
+ * - {@link saveTraineeStatus} → `PATCH /api/assessments/trainees/:employeeId/trainee-status`
  *
  * The server derives every CEFR level, so a saved score is never sent with one.
  * Rosters are not cached here: the API pages, searches and sorts them, so a
@@ -306,26 +310,22 @@ export class AssessmentService {
   }
 
   /**
-   * Moves a trainee onto (or off) a LAP / Remedial track. `status: 'none'`
-   * closes the open track.
+   * Changes the status a trainee holds. `status: 'regular'` ends whatever they
+   * hold; any other value supersedes it and opens a new period.
    */
-  saveLapRemedial(
+  saveTraineeStatus(
     employeeId: string,
-    status: LapRemedialStatus,
+    status: TraineeStatusChange,
     remark: string,
-    startDate?: string,
-    closeDate?: string,
+    effectiveDate?: string,
   ): Observable<void> {
     const body: Record<string, string> = { status, remark: remark.trim() };
-    if (startDate) {
-      body['startDate'] = startDate;
-    }
-    if (closeDate) {
-      body['closeDate'] = closeDate;
+    if (effectiveDate) {
+      body['effectiveDate'] = effectiveDate;
     }
 
     return this.http.patch<void>(
-      `${this.baseUrl}/assessments/trainees/${encodeURIComponent(employeeId)}/lap-remedial`,
+      `${this.baseUrl}/assessments/trainees/${encodeURIComponent(employeeId)}/trainee-status`,
       body,
     );
   }
@@ -350,14 +350,18 @@ function toTraineeAssessment(api: ApiTraineeAssessment): TraineeAssessment {
     if (result.score === null || result.score === undefined) {
       continue;
     }
-    results[examId] = { score: result.score, cefr: result.cefr ?? '' };
+    results[examId] = {
+      score: result.score,
+      cefr: result.cefr ?? '',
+      assessedOn: result.assessedOn ?? null,
+    };
   }
 
   return {
     employeeId: String(api.employeeId),
     name: api.name,
     results,
-    status: (api.status as LapRemedialStatus | undefined) ?? undefined,
+    status: (api.status as TraineeStatus | undefined) ?? undefined,
     startDate: api.startDate ?? undefined,
     closeDate: api.closeDate ?? undefined,
     remark: api.remark ?? undefined,

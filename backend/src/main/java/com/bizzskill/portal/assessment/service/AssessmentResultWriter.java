@@ -39,14 +39,20 @@ public class AssessmentResultWriter {
     /**
      * Applies a score, or clears it when {@code score} is null.
      *
-     * @param bands the CEFR mapping, loaded once by the caller and reused across
-     *              every score it writes.
-     * @param actor the username recorded in the audit trail.
+     * @param assessedOn the date the exam was conducted, recorded with the result.
+     *                   It is supplied by the caller rather than read from the clock
+     *                   here, because the day a score is keyed in is not necessarily
+     *                   the day the exam was sat — a sheet is often uploaded the
+     *                   following morning.
+     * @param bands      the CEFR mapping, loaded once by the caller and reused across
+     *                   every score it writes.
+     * @param actor      the username recorded in the audit trail.
      */
     public void write(
             Long employeeId,
             Long assessmentId,
             Integer score,
+            LocalDate assessedOn,
             List<AppCefrBand> bands,
             String actor) {
 
@@ -74,13 +80,13 @@ public class AssessmentResultWriter {
             Integer previousScore = result.getIntScore();
             String previousLevel = result.getTxtCefrLevel();
 
-            result.recordScore(score, CefrMappingService.levelFor(score, bands), result.getTxtRemarks(), LocalDate.now());
+            result.recordScore(score, CefrMappingService.levelFor(score, bands), result.getTxtRemarks(), assessedOn);
             audit.save(AppAssessmentResultAudit.ofUpdate(result, previousScore, previousLevel, actor));
             return;
         }
 
         AppAssessmentResult created = AppAssessmentResult.create(employeeId, assessmentId);
-        created.recordScore(score, CefrMappingService.levelFor(score, bands), null, LocalDate.now());
+        created.recordScore(score, CefrMappingService.levelFor(score, bands), null, assessedOn);
         AppAssessmentResult saved = results.save(created);
         audit.save(AppAssessmentResultAudit.ofInsert(saved, actor));
     }

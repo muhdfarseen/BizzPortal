@@ -19,6 +19,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -108,6 +110,7 @@ public class AssessmentUploadService {
     @Transactional
     public UploadCommitResponse commit(PortalPrincipal caller, UploadCommitRequest request) {
         AppAssessment assessment = requireActiveAssessment(request.examId());
+        LocalDate assessedOn = requirePlausibleDate(request.assessedOn());
 
         // Re-resolved from the caller's scope: the sheet's group is a claim, and
         // this is where it is checked.
@@ -163,16 +166,33 @@ public class AssessmentUploadService {
         String actor = caller.username();
         for (Map.Entry<Long, Integer> entry : pending.entrySet()) {
             resultWriter.write(
-                    entry.getKey(), assessment.getIntAssessmentId(), entry.getValue(), bands, actor);
+                    entry.getKey(), assessment.getIntAssessmentId(), entry.getValue(), assessedOn, bands, actor);
         }
 
-        log.info("Uploaded {} score(s) for assessment {} by {}",
-                pending.size(), assessment.getTxtAssessmentName(), actor);
+        log.info("Uploaded {} score(s) for assessment {} conducted {} by {}",
+                pending.size(), assessment.getTxtAssessmentName(), assessedOn, actor);
 
         return new UploadCommitResponse(pending.size());
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * Checks the conducted date for the one mistake worth catching: a date in the
+     * future.
+     *
+     * <p>A day of slack is allowed, because the portal keeps its time in UTC and a
+     * user east of it is already on tomorrow's date by their own clock — rejecting
+     * their "today" would be a bug, not a guard. Anything further ahead is a typo.
+     */
+    private LocalDate requirePlausibleDate(LocalDate assessedOn) {
+        LocalDate latest = LocalDate.now(ZoneOffset.UTC).plusDays(1);
+        if (assessedOn.isAfter(latest)) {
+            throw new RequestValidationException(List.of(new FieldViolation(
+                    "assessedOn", "The date the exam was conducted cannot be in the future.")));
+        }
+        return assessedOn;
+    }
 
     private AppAssessment requireActiveAssessment(String examId) {
         Long id;

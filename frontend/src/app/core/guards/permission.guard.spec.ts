@@ -74,11 +74,14 @@ describe('permissionGuard', () => {
     expect(admittedBy('configuration.manage')).toEqual(['superadmin']);
   });
 
-  it('keeps moving LAP / Remedial tracks away from Faculty', () => {
-    expect(admittedBy('lap-remedial.manage')).toEqual([
+  it('admits every role to changing a trainee status, Faculty included', () => {
+    // Migration V5 grants Faculty trainee-status.manage; only the two administrative
+    // permissions are held back from the roles below Super Admin.
+    expect(admittedBy('trainee-status.manage')).toEqual([
       'superadmin',
       'program-manager',
       'location-admin',
+      'faculty',
     ]);
   });
 

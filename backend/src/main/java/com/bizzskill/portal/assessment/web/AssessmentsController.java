@@ -1,13 +1,13 @@
 package com.bizzskill.portal.assessment.web;
 
-import com.bizzskill.portal.assessment.dto.LapRemedialRequest;
+import com.bizzskill.portal.assessment.dto.TraineeStatusRequest;
 import com.bizzskill.portal.assessment.dto.TraineeAssessmentResponse;
 import com.bizzskill.portal.assessment.dto.TraineeLookupRequest;
 import com.bizzskill.portal.assessment.dto.TraineeLookupResponse;
 import com.bizzskill.portal.assessment.dto.TraineeResultsRequest;
 import com.bizzskill.portal.assessment.service.AssessmentRosterService;
-import com.bizzskill.portal.assessment.service.LapRemedialService;
-import com.bizzskill.portal.common.enums.TrackFilter;
+import com.bizzskill.portal.assessment.service.TraineeStatusService;
+import com.bizzskill.portal.common.enums.StatusFilter;
 import com.bizzskill.portal.common.web.PageQuery;
 import com.bizzskill.portal.common.web.PageResponse;
 import com.bizzskill.portal.security.CurrentUser;
@@ -26,25 +26,25 @@ import org.springframework.web.bind.annotation.RestController;
 
 
 /**
- * The assessment table: rosters, score entry, and LAP / Remedial moves.
+ * The assessment table: rosters, score entry, and trainee status changes.
  *
  * <p>The three endpoints are guarded by three different permissions, because they
  * are genuinely different capabilities: a Faculty member scores trainees they are
- * assigned, but moving someone onto a remedial track is a management decision held
- * by {@code lap-remedial.manage}.
+ * assigned, but deciding that someone is not progressing is a management decision
+ * held by {@code trainee-status.manage}.
  */
 @RestController
 @RequestMapping("/api/assessments")
 public class AssessmentsController {
 
     private final AssessmentRosterService roster;
-    private final LapRemedialService lapRemedial;
+    private final TraineeStatusService traineeStatus;
     private final CurrentUser currentUser;
 
     public AssessmentsController(
-            AssessmentRosterService roster, LapRemedialService lapRemedial, CurrentUser currentUser) {
+            AssessmentRosterService roster, TraineeStatusService traineeStatus, CurrentUser currentUser) {
         this.roster = roster;
-        this.lapRemedial = lapRemedial;
+        this.traineeStatus = traineeStatus;
         this.currentUser = currentUser;
     }
 
@@ -65,7 +65,8 @@ public class AssessmentsController {
      * @param size   rows per page; defaults to {@code PageQuery.DEFAULT_SIZE} and is
      *               capped at {@code PageQuery.MAX_SIZE}.
      * @param search free text matched against the name or employee number.
-     * @param status keeps only trainees on the given LAP / Remedial state.
+     * @param status keeps only trainees on the given tab: regular, remedial, lap,
+     *               cleared, or other (discontinued, purged or resigned).
      * @param sort   orders the pages; unknown keys are refused rather than passed on.
      */
     @GetMapping("/trainees")
@@ -86,7 +87,7 @@ public class AssessmentsController {
                 batchId,
                 lgId,
                 PageQuery.of(page, size, search),
-                TrackFilter.parse(status),
+                StatusFilter.parse(status),
                 sort,
                 direction);
     }
@@ -123,12 +124,18 @@ public class AssessmentsController {
         roster.saveResults(currentUser.require(), employeeId, request);
     }
 
-    /** Moves a trainee between the LAP / Remedial tracks, or closes their track. */
-    @PatchMapping("/trainees/{employeeId}/lap-remedial")
+    /**
+     * Changes the status a trainee holds.
+     *
+     * <p>Addressed by employee number, and the caller must be able to see that
+     * trainee — knowing an employee number is not permission to decide their
+     * standing on the programme.
+     */
+    @PatchMapping("/trainees/{employeeId}/trainee-status")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("hasAuthority('lap-remedial.manage')")
-    public void saveLapRemedial(
-            @PathVariable Long employeeId, @Valid @RequestBody LapRemedialRequest request) {
-        lapRemedial.save(currentUser.require(), employeeId, request);
+    @PreAuthorize("hasAuthority('trainee-status.manage')")
+    public void saveTraineeStatus(
+            @PathVariable Long employeeId, @Valid @RequestBody TraineeStatusRequest request) {
+        traineeStatus.save(currentUser.require(), employeeId, request);
     }
 }

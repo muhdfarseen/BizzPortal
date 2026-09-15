@@ -1,6 +1,14 @@
 <div class="page-shell">
   <div class="page-header">
-    <h2 class="page-title">LAP / Remedial</h2>
+    <div class="page-heading">
+      <h2 class="page-title">Trainee Status</h2>
+      @if (canUpload()) {
+        <button type="button" class="btn-upload" (click)="openUpload()">
+          <ng-icon name="reiconUpload" size="16" />
+          Bulk status change
+        </button>
+      }
+    </div>
     <app-filter-bar
       [requireFullSelection]="true"
       [exams]="exams()"
@@ -10,23 +18,25 @@
   </div>
 
   @if (hasSearched()) {
-    <div class="track-tabs" role="tablist" aria-label="LAP / Remedial tracks">
-      @for (tab of trackTabs; track tab.status) {
+    <div class="status-tabs" role="tablist" aria-label="Trainee status">
+      @for (tab of statusTabs; track tab) {
         <button
           type="button"
           role="tab"
-          class="track-tab"
-          [class.is-active]="activeTab() === tab.status"
-          [attr.aria-selected]="activeTab() === tab.status ? 'true' : 'false'"
-          (click)="selectTab(tab.status)"
+          class="status-tab"
+          [class.is-active]="activeTab() === tab"
+          [attr.aria-selected]="activeTab() === tab ? 'true' : 'false'"
+          (click)="selectTab(tab)"
         >
-          {{ tab.label }}
+          {{ tabLabel(tab) }}
         </button>
       }
     </div>
+  }
 
+  @if (hasSearched()) {
     @if (showTable()) {
-      <section class="results" aria-label="LAP / Remedial trainees">
+      <section class="results" aria-label="Trainee status">
         @if (isStale()) {
           <p class="results-notice" role="status">Filters changed — search again to refresh.</p>
         }
@@ -35,8 +45,9 @@
           [data]="rows()"
           [exams]="selectedExams()"
           [actions]="rowActions()"
-          [showStartDate]="showsTrackColumns()"
-          [showRemark]="showsTrackColumns()"
+          [showStatus]="showsStatusColumn()"
+          [showStartDate]="showsStatusColumns()"
+          [showRemark]="showsStatusColumns()"
           [pageIndex]="pageIndex()"
           [pageSize]="pageSize()"
           [totalElements]="totalElements()"
@@ -68,9 +79,17 @@
 </div>
 
 @if (confirming(); as request) {
-  <app-lap-remedial-dialog
+  <app-trainee-status-dialog
     [request]="request"
     (confirm)="onConfirm($event)"
     (cancelled)="closeDialog()"
+  />
+}
+
+@if (uploading()) {
+  <app-trainee-status-upload-dialog
+    [exams]="exams()"
+    (saved)="onUploadSaved($event)"
+    (cancelled)="closeUpload()"
   />
 }

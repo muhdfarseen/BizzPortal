@@ -143,7 +143,7 @@ erDiagram
     APP_USER ||--o{ APP_USER_LOCATION : "intuser_id"
     APP_USER ||--o{ APP_USER_BATCH : "intuser_id"
     APP_ASSESSMENT ||--o{ APP_ASSESSMENT_RESULT : "intassessment_id"
-    APP_ASSESSMENT ||--o{ APP_LAP_REMEDIAL : "intassessment_id"
+    APP_ASSESSMENT ||--o{ APP_TRAINEE_STATUS : "intassessment_id"
     APP_ASSESSMENT_RESULT ||--o{ APP_ASSESSMENT_RESULT_AUDIT : "intresult_id (logical)"
 
     APP_ROLE {
@@ -219,7 +219,7 @@ erDiagram
         int intscore "nullable - null clears the score"
         varchar txtcefr_level "varchar(30), nullable, level at record time"
         varchar txtremarks "varchar(500), nullable"
-        date dateassessed_on "nullable"
+        date dateassessed_on "nullable - the day the exam was conducted"
         timestamptz datecreated_on
         varchar txtcreated_by "varchar(60), nullable"
         timestamptz dateupdated_on "nullable"
@@ -253,12 +253,12 @@ erDiagram
         varchar txtupdated_by "varchar(60), nullable"
     }
 
-    APP_LAP_REMEDIAL {
-        bigint intlap_remedial_id PK
-        bigint intemployee_id "-> PARTICIPANT.intemployee_id, one OPEN row max"
+    APP_TRAINEE_STATUS {
+        bigint inttrainee_status_id PK
+        bigint intemployee_id "-> PARTICIPANT.intemployee_id, one CURRENT row max"
         bigint intassessment_id "FK -> APP_ASSESSMENT, nullable"
-        varchar txttrack "varchar(20) - remedial | lap"
-        varchar txtstatus "varchar(1) - A (open) | C (closed)"
+        varchar txttrainee_status "varchar(20) - remedial | lap | cleared | discontinued | purged | resigned"
+        varchar txtstate "varchar(1) - A (current) | C (superseded)"
         varchar txtremark "varchar(500), nullable"
         date datestart_date
         date dateclose_date "nullable"
@@ -271,21 +271,27 @@ erDiagram
 
 ### 1.4 The constraint that carries the most weight
 
-`app_lap_remedial` has an unusual index:
+`app_trainee_status` has an unusual index:
 
 ```sql
-CREATE UNIQUE INDEX uq_app_lap_open_per_employee
-    ON app_lap_remedial (intemployee_id)
-    WHERE txtstatus = 'A';
+CREATE UNIQUE INDEX uq_app_trainee_status_current_per_employee
+    ON app_trainee_status (intemployee_id)
+    WHERE txtstate = 'A';
 ```
 
-A **partial** unique index: it constrains only the rows where the track is open.
-So an employee may accumulate any number of closed LAP or Remedial placements —
-history is kept — but can never have two open at once. That single index is what
-makes "which track is this person on?" a question with exactly one answer, and the
-service layer does not have to defend the invariant with application checks that
-could race. `LapRemedialService` closes the previous row before opening a new one,
-which is what keeps the index satisfied.
+A **partial** unique index: it constrains only the rows that are current. So an
+employee may accumulate any number of superseded statuses — history is kept — but
+can never hold two at once. That single index is what makes "what status does this
+person hold?" a question with exactly one answer, and the service layer does not
+have to defend the invariant with application checks that could race.
+`TraineeStatusService` supersedes the previous row before inserting a new one,
+which is what keeps the index satisfied — and a genuine race surfaces as a `409`
+rather than as two current rows.
+
+`regular` is deliberately absent from `txttrainee_status`: holding no current row
+*is* being regular, so a trainee cannot be "regular" and something else at the same
+time, and the dashboard's regular count is the trainee count minus the four
+statuses it can count.
 
 The same pattern would have been the right answer for "one current score per
 employee per assessment", but that invariant is simpler — unconditional — so it is
@@ -297,7 +303,7 @@ The honest summary, since the database does not enforce everything:
 
 | Rule | Enforced by | Enforced in |
 |---|---|---|
-| One open LAP/Remedial per employee | Partial unique index | Database |
+| One current trainee status per employee | Partial unique index | Database |
 | One score per employee per assessment | Unique constraint | Database |
 | Role, permission, assessment references | Foreign keys | Database |
 | Unique username, employee id, role code, permission code | Unique constraints | Database |
@@ -335,14 +341,14 @@ who can sign in but see nothing. The three places to be careful are
 | `superadmin` | Super Admin | `all` | 8 (everything) |
 | `program-manager` | Program Manager | `all` | 6 (no `users.manage`, no `configuration.manage`) |
 | `location-admin` | Location Admin | `assigned-locations` | 6 |
-| `faculty` | Faculty | `assigned-batches` | 5 (no `lap-remedial.manage`) |
+| `faculty` | Faculty | `assigned-batches` | 6 |
 
 **Eight permissions**, which are also the JWT authority strings —
 `hasAuthority('assessments.edit')` is checking this table's
 `txtpermission_code` verbatim:
 
 `dashboard.view`, `assessments.view`, `assessments.edit`,
-`lap-remedial.view`, `lap-remedial.manage`, `reports.view`, `users.manage`,
+`trainee-status.view`, `trainee-status.manage`, `reports.view`, `users.manage`,
 `configuration.manage`.
 
 **Ten CEFR bands.** Note that 76 appears in two bands — that overlap is in the
@@ -387,13 +393,14 @@ flowchart TB
         PC["@PreAuthorize on every controller"]
     end
 
-    subgraph web["web — 8 @RestController classes, 24 endpoints"]
+    subgraph web["web — 9 @RestController classes, 27 endpoints"]
         AC[AuthController]
         OC[OrganizationController]
         DC[DashboardController]
         CC[ConfigurationController]
         ASc[AssessmentsController]
         AUC[AssessmentUploadController]
+        TSUC[TraineeStatusUploadController]
         UC[UserController]
         HC[HealthController]
     end
@@ -407,14 +414,15 @@ flowchart TB
         ARS[AssessmentRosterService]
         ARW[AssessmentResultWriter]
         AUS[AssessmentUploadService]
-        LRS[LapRemedialService]
+        TSS2[TraineeStatusService]
+        TSU[TraineeStatusUploadService]
         TSS[TraineeScopeService]
         US[UserService]
     end
 
     subgraph repo["repository — Spring Data JPA"]
         R1["Portal repos (read-only):<br/>BatchRepository, BizLocationRepository,<br/>LearningGroupRepository, ParticipantRepository"]
-        R2["App repos:<br/>AppUserRepository, AppRoleRepository,<br/>AppPermissionRepository, AppAssessmentRepository,<br/>AppAssessmentResultRepository,<br/>AppAssessmentResultAuditRepository,<br/>AppCefrBandRepository, AppLapRemedialRepository"]
+        R2["App repos:<br/>AppUserRepository, AppRoleRepository,<br/>AppPermissionRepository, AppAssessmentRepository,<br/>AppAssessmentResultRepository,<br/>AppAssessmentResultAuditRepository,<br/>AppCefrBandRepository, AppTraineeStatusRepository"]
     end
 
     subgraph data["PostgreSQL"]
@@ -431,13 +439,16 @@ flowchart TB
     ASc --> ARS
     ASc --> LRS
     AUC --> AUS
+    TSUC --> TSU
     UC --> US
 
     ARS --> ARW
     AUS --> ARW
+    TSU --> TSS2
     DS --> TSS
     ARS --> TSS
     AUS --> TSS
+    TSU --> TSS
     LRS --> TSS
     US --> TSS
 
@@ -547,6 +558,10 @@ The core workflow. `AssessmentResultWriter` exists because two callers —
 whole CSV) — must write scores *identically*, including the audit trail. Duplicating
 that logic is how two paths drift apart.
 
+`TraineeStatusUploadService` is the status equivalent: it validates a whole sheet and
+then calls `TraineeStatusService.save` once per row, so the bulk sheet and the single
+`Change status` action cannot diverge in what they allow or in what they record.
+
 ```mermaid
 classDiagram
     direction TB
@@ -554,7 +569,7 @@ classDiagram
     class AssessmentsController {
         +trainees(locationId, batchId, lgId) List~TraineeAssessmentResponse~
         +saveResults(employeeId, TraineeResultsRequest) void
-        +saveLapRemedial(employeeId, LapRemedialRequest) void
+        +saveTraineeStatus(employeeId, TraineeStatusRequest) void
     }
     class AssessmentUploadController {
         +template(examId, locationId, batchId, lgId) ResponseEntity~String~
@@ -586,8 +601,13 @@ classDiagram
         +templateCsv(caller, examId, locationId, batchId, lgId) String
         +commit(caller, UploadCommitRequest) UploadCommitResponse
     }
-    class LapRemedialService {
-        +save(caller, employeeId, LapRemedialRequest) void
+    class TraineeStatusService {
+        +save(caller, employeeId, TraineeStatusRequest) void
+    }
+    class TraineeStatusUploadService {
+        +templateCsv(caller, locationId, batchId, lgId, StatusFilter, List~String~ examIds) byte[]
+        +lookup(caller, locationId, batchId, lgId, List~Long~ employeeIds) TraineeStatusLookupResponse
+        +commit(caller, TraineeStatusUploadRequest) TraineeStatusUploadResponse
     }
     class AssessmentConfigService {
         +list() List~AssessmentResponse~
@@ -631,17 +651,17 @@ classDiagram
         +int intmin_score
         +int intmax_score
     }
-    class AppLapRemedial {
-        +Long intlap_remedial_id
+    class AppTraineeStatus {
+        +Long inttrainee_status_id
         +Long intemployee_id
-        +LapTrack txttrack
-        +LapStatus txtstatus
+        +TraineeStatus txttrainee_status
+        +StatusState txtstate
         +LocalDate datestart_date
         +LocalDate dateclose_date
     }
 
     AssessmentsController --> AssessmentRosterService
-    AssessmentsController --> LapRemedialService
+    AssessmentsController --> TraineeStatusService
     AssessmentUploadController --> AssessmentUploadService
     ConfigurationController --> AssessmentConfigService
     ConfigurationController --> CefrMappingService
@@ -650,14 +670,15 @@ classDiagram
     AssessmentUploadService --> AssessmentResultWriter
     AssessmentRosterService --> TraineeScopeService
     AssessmentUploadService --> TraineeScopeService
-    LapRemedialService --> TraineeScopeService
+    TraineeStatusService --> TraineeScopeService
+    TraineeStatusUploadService --> TraineeStatusService
 
     AssessmentResultWriter --> AppAssessmentResult
     AssessmentResultWriter --> AppAssessmentResultAudit
     AssessmentRosterService --> AppAssessment
     AssessmentConfigService --> AppAssessment
     CefrMappingService --> AppCefrBand
-    LapRemedialService --> AppLapRemedial
+    TraineeStatusService --> AppTraineeStatus
 ```
 
 ### 2.4 Users, roles and organisation

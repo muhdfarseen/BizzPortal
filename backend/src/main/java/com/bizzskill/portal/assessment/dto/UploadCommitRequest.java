@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -16,6 +17,11 @@ import java.util.List;
  *
  * @param examId     the assessment every row is scored against. One assessment per
  *                   upload, so a sheet can never mix columns.
+ * @param assessedOn the date the exam was conducted, recorded against every row.
+ *                   One date for the sheet, because a group sits the same paper on
+ *                   the same day; it travels with the request rather than being
+ *                   taken from the clock, since a sheet is routinely uploaded after
+ *                   the fact.
  * @param locationId the group the sheet was generated for. Re-resolved on the
  *                   server and checked against the caller's scope, so a sheet
  *                   cannot be used to write outside the group it came from.
@@ -25,6 +31,9 @@ public record UploadCommitRequest(
         @NotBlank(message = "Choose an assessment.")
         @Pattern(regexp = "\\d{1,19}", message = "Choose an assessment.")
         String examId,
+
+        @NotNull(message = "Choose the date the exam was conducted.")
+        LocalDate assessedOn,
 
         String locationId,
 

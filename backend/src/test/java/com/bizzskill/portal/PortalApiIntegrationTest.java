@@ -12,14 +12,20 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -300,12 +306,12 @@ class PortalApiIntegrationTest {
         }
 
         @Test
-        @DisplayName("the track filter narrows to one tab")
-        void trackFilterNarrowsToATab() throws Exception {
-            mvc.perform(get("/api/assessments/trainees?batchId=9001&status=none")
+        @DisplayName("the status filter narrows to one tab")
+        void statusFilterNarrowsToATab() throws Exception {
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&status=regular")
                             .header("Authorization", bearer(adminToken)))
                     .andExpect(status().isOk())
-                    // Nobody in batch 9001 is on a track yet.
+                    // Nobody in batch 9001 holds a status yet.
                     .andExpect(jsonPath("$.totalElements").value(2));
 
             mvc.perform(get("/api/assessments/trainees?batchId=9001&status=lap")
@@ -315,8 +321,8 @@ class PortalApiIntegrationTest {
         }
 
         @Test
-        @DisplayName("an unknown track filter is refused")
-        void unknownTrackFilterIsRefused() throws Exception {
+        @DisplayName("an unknown status filter is refused")
+        void unknownStatusFilterIsRefused() throws Exception {
             mvc.perform(get("/api/assessments/trainees?batchId=9001&status=sideways")
                             .header("Authorization", bearer(adminToken)))
                     .andExpect(status().isBadRequest())
@@ -536,13 +542,32 @@ class PortalApiIntegrationTest {
         }
 
         @Test
-        @DisplayName("faculty cannot move a trainee onto a remedial track")
-        void facultyCannotManageLapRemedial() throws Exception {
-            // Faculty hold lap-remedial.view but not lap-remedial.manage.
-            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+        @DisplayName("faculty can change the status of a trainee in their batch")
+        void facultyCanManageTraineeStatus() throws Exception {
+            // V5 grants Faculty trainee-status.manage: they are the people who decide
+            // who needs remedial support, and both the row action and the bulk sheet
+            // depend on it.
+            mvc.perform(patch("/api/assessments/trainees/70001/trainee-status")
                             .header("Authorization", bearer(facultyToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"status\":\"remedial\",\"remark\":\"Needs support.\"}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/assessments/trainees")
+                            .param("status", "remedial")
+                            .header("Authorization", bearer(facultyToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.items[0].employeeId").value("70001"));
+        }
+
+        @Test
+        @DisplayName("the granted permission is still bounded by the caller's batches")
+        void facultyCannotManageTraineeStatusOutsideTheirBatch() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70003/trainee-status")
+                            .header("Authorization", bearer(facultyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"remedial\",\"remark\":\"Out of scope.\"}"))
                     .andExpect(status().isForbidden());
         }
 
@@ -711,7 +736,7 @@ class PortalApiIntegrationTest {
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"examId":"1","batchId":9001,"rows":[
+                                    {"examId":"1","assessedOn":"2026-05-04","batchId":9001,"rows":[
                                       {"employeeId":"70001","score":33},
                                       {"employeeId":"70002","score":80}]}
                                     """))
@@ -724,13 +749,95 @@ class PortalApiIntegrationTest {
         }
 
         @Test
+        @DisplayName("records the date the exam was conducted against every row")
+        void recordsTheConductedDate() throws Exception {
+            mvc.perform(post("/api/assessments/uploads")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"examId":"1","assessedOn":"2026-05-04","batchId":9001,"rows":[
+                                      {"employeeId":"70001","score":33},
+                                      {"employeeId":"70002","score":80}]}
+                                    """))
+                    .andExpect(status().isOk());
+
+            // Not the day the sheet was uploaded: the date the group sat the exam.
+            List<String> stored = jdbc.queryForList("""
+                    select to_char(dateassessed_on, 'YYYY-MM-DD')
+                    from app_assessment_result
+                    where intassessment_id = 1
+                    order by intemployee_id
+                    """, String.class);
+            assertThat(stored).containsExactly("2026-05-04", "2026-05-04");
+        }
+
+        @Test
+        @DisplayName("refuses a sheet that does not say when the exam was conducted")
+        void refusesAMissingConductedDate() throws Exception {
+            mvc.perform(post("/api/assessments/uploads")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"examId":"1","batchId":9001,"rows":[
+                                      {"employeeId":"70001","score":33}]}
+                                    """))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("assessedOn"));
+
+            Integer stored = jdbc.queryForObject(
+                    "select count(*) from app_assessment_result where intassessment_id = 1", Integer.class);
+            assertThat(stored).isZero();
+        }
+
+        @Test
+        @DisplayName("refuses a conducted date in the future")
+        void refusesAFutureConductedDate() throws Exception {
+            // Computed rather than written down, so the test does not quietly become
+            // a test of a date that has since passed.
+            String future = LocalDate.now(ZoneOffset.UTC).plusDays(30).toString();
+
+            mvc.perform(post("/api/assessments/uploads")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"examId":"1","assessedOn":"%s","batchId":9001,"rows":[
+                                      {"employeeId":"70001","score":33}]}
+                                    """.formatted(future)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("assessedOn"));
+
+            Integer stored = jdbc.queryForObject(
+                    "select count(*) from app_assessment_result where intassessment_id = 1", Integer.class);
+            assertThat(stored).isZero();
+        }
+
+        @Test
+        @DisplayName("the roster reads the conducted date back")
+        void rosterReturnsTheConductedDate() throws Exception {
+            mvc.perform(post("/api/assessments/uploads")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"examId":"1","assessedOn":"2026-05-04","batchId":9001,"rows":[
+                                      {"employeeId":"70001","score":33}]}
+                                    """))
+                    .andExpect(status().isOk());
+
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=0&size=25")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[?(@.employeeId == '70001')].results.1.assessedOn")
+                            .value("2026-05-04"));
+        }
+
+        @Test
         @DisplayName("refuses the whole sheet when any row is wrong, storing nothing")
         void refusesTheWholeSheet() throws Exception {
             mvc.perform(post("/api/assessments/uploads")
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"examId":"1","batchId":9001,"rows":[
+                                    {"examId":"1","assessedOn":"2026-05-04","batchId":9001,"rows":[
                                       {"employeeId":"70001","score":33},
                                       {"employeeId":"70002","score":500}]}
                                     """))
@@ -750,7 +857,7 @@ class PortalApiIntegrationTest {
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"examId":"1","batchId":9001,"rows":[
+                                    {"examId":"1","assessedOn":"2026-05-04","batchId":9001,"rows":[
                                       {"employeeId":"70003","score":50}]}
                                     """))
                     .andExpect(status().isBadRequest())
@@ -764,7 +871,7 @@ class PortalApiIntegrationTest {
                             .header("Authorization", bearer(facultyToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"examId":"1","batchId":9002,"rows":[
+                                    {"examId":"1","assessedOn":"2026-05-04","batchId":9002,"rows":[
                                       {"employeeId":"70003","score":50}]}
                                     """))
                     .andExpect(status().isForbidden());
@@ -848,6 +955,269 @@ class PortalApiIntegrationTest {
     }
 
     @Nested
+    @DisplayName("trainee status")
+    class TraineeStatusChange {
+
+        /** Puts a trainee on a status and returns the response. */
+        private ResultActions change(String employeeId, String json)
+                throws Exception {
+            return mvc.perform(patch("/api/assessments/trainees/" + employeeId + "/trainee-status")
+                    .header("Authorization", bearer(adminToken))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(json));
+        }
+
+        private List<Map<String, Object>> storedPeriods(long employeeId) {
+            return jdbc.queryForList("""
+                    select txttrainee_status, txtstate, txtremark as remark,
+                           to_char(datestart_date, 'YYYY-MM-DD') as start_date,
+                           to_char(dateclose_date, 'YYYY-MM-DD') as close_date
+                    from app_trainee_status where intemployee_id = ?
+                    order by inttrainee_status_id
+                    """, employeeId);
+        }
+
+        @Test
+        @DisplayName("puts a regular trainee on a status and dates it")
+        void movesARegularTraineeOntoAStatus() throws Exception {
+            change("70001", """
+                    {"status":"remedial","remark":"Baseline below B1.","effectiveDate":"2026-02-02"}
+                    """).andExpect(status().isNoContent());
+
+            assertThat(storedPeriods(70001)).hasSize(1);
+            assertThat(storedPeriods(70001).getFirst())
+                    .containsEntry("txttrainee_status", "remedial")
+                    .containsEntry("txtstate", "A")
+                    .containsEntry("remark", "Baseline below B1.")
+                    .containsEntry("start_date", "2026-02-02");
+        }
+
+        @Test
+        @DisplayName("supersedes the old status and keeps it as history")
+        void keepsTheHistoryWhenStatusChanges() throws Exception {
+            change("70001", """
+                    {"status":"remedial","remark":"Needs support.","effectiveDate":"2026-02-02"}
+                    """).andExpect(status().isNoContent());
+            change("70001", """
+                    {"status":"lap","remark":"Needs more than remedial.","effectiveDate":"2026-03-09"}
+                    """).andExpect(status().isNoContent());
+
+            var periods = storedPeriods(70001);
+            assertThat(periods).hasSize(2);
+
+            // The first period is closed on the day the second began, so the two
+            // never overlap — and the reason it was held is not overwritten.
+            assertThat(periods.get(0))
+                    .containsEntry("txttrainee_status", "remedial")
+                    .containsEntry("txtstate", "C")
+                    .containsEntry("close_date", "2026-03-09")
+                    .containsEntry("remark", "Needs support.");
+            assertThat(periods.get(1))
+                    .containsEntry("txttrainee_status", "lap")
+                    .containsEntry("txtstate", "A")
+                    .containsEntry("start_date", "2026-03-09");
+        }
+
+        @Test
+        @DisplayName("records an outcome, which sticks until it is changed again")
+        void recordsAnOutcome() throws Exception {
+            change("70001", """
+                    {"status":"cleared","remark":"Cleared the post-assessment.",
+                     "effectiveDate":"2026-04-01"}
+                    """).andExpect(status().isNoContent());
+
+            // Not a closed track: cleared is what they hold now, which is what lets
+            // the figures account for them.
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=0&size=25")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(jsonPath("$.items[?(@.employeeId == '70001')].status")
+                            .value("cleared"));
+
+            change("70001", """
+                    {"status":"resigned","remark":"Left the organisation.","effectiveDate":"2026-05-04"}
+                    """).andExpect(status().isNoContent());
+
+            var periods = storedPeriods(70001);
+            assertThat(periods).hasSize(2);
+            assertThat(periods.get(1)).containsEntry("txttrainee_status", "resigned");
+        }
+
+        @Test
+        @DisplayName("records every exit a trainee can leave by")
+        void recordsEveryExit() throws Exception {
+            for (String exit : java.util.List.of("discontinued", "purged", "resigned")) {
+                change("70003", "{\"status\":\"" + exit + "\",\"remark\":\"Left.\"}")
+                        .andExpect(status().isNoContent());
+                // Each one supersedes the last, so the trainee holds exactly one.
+                mvc.perform(get("/api/assessments/trainees?batchId=9002&page=0&size=25")
+                                .header("Authorization", bearer(adminToken)))
+                        .andExpect(jsonPath("$.items[0].status").value(exit));
+            }
+        }
+
+        @Test
+        @DisplayName("ends a status, returning the trainee to regular")
+        void endsAStatus() throws Exception {
+            change("70001", """
+                    {"status":"remedial","remark":"Needs support.","effectiveDate":"2026-02-02"}
+                    """).andExpect(status().isNoContent());
+            change("70001", """
+                    {"status":"regular","remark":"No longer needs support.","effectiveDate":"2026-05-04"}
+                    """).andExpect(status().isNoContent());
+
+            var periods = storedPeriods(70001);
+            assertThat(periods).hasSize(1);
+            assertThat(periods.getFirst())
+                    .containsEntry("txtstate", "C")
+                    .containsEntry("close_date", "2026-05-04");
+
+            // Holding no status, the row carries no status key at all.
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=0&size=25")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(jsonPath("$.items[?(@.employeeId == '70001')].status").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("filters each tab by the status it stands for")
+        void filtersEachTab() throws Exception {
+            change("70001", "{\"status\":\"remedial\",\"remark\":\"Support.\"}")
+                    .andExpect(status().isNoContent());
+            change("70002", "{\"status\":\"discontinued\",\"remark\":\"Left.\"}")
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=0&size=25&status=remedial")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(jsonPath("$.items.length()").value(1))
+                    .andExpect(jsonPath("$.items[0].employeeId").value("70001"));
+
+            // "Other" is one tab over the three ways a trainee can leave.
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=0&size=25&status=other")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(jsonPath("$.items.length()").value(1))
+                    .andExpect(jsonPath("$.items[0].employeeId").value("70002"))
+                    .andExpect(jsonPath("$.items[0].status").value("discontinued"));
+
+            // 70003 is in the other batch and holds nothing: the Regular tab.
+            mvc.perform(get("/api/assessments/trainees?batchId=9002&page=0&size=25&status=regular")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(jsonPath("$.items.length()").value(1))
+                    .andExpect(jsonPath("$.items[0].employeeId").value("70003"));
+
+            // The tabs nobody is on are empty rather than showing everyone.
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=0&size=25&status=lap")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(jsonPath("$.items.length()").value(0));
+        }
+
+        @Test
+        @DisplayName("carries the status, its date and its reason back to the table")
+        void returnsTheStatusToTheTable() throws Exception {
+            change("70001", """
+                    {"status":"lap","remark":"Escalated after the mid.","effectiveDate":"2026-03-09"}
+                    """).andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/assessments/trainees?batchId=9001&page=0&size=25")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(jsonPath("$.items[?(@.employeeId == '70001')].status").value("lap"))
+                    .andExpect(jsonPath("$.items[?(@.employeeId == '70001')].startDate").value("2026-03-09"))
+                    .andExpect(jsonPath("$.items[?(@.employeeId == '70001')].remark")
+                            .value("Escalated after the mid."));
+        }
+
+        @Test
+        @DisplayName("dates a status change to today when none is given")
+        void defaultsTheDateToToday() throws Exception {
+            change("70001", "{\"status\":\"remedial\",\"remark\":\"Support.\"}")
+                    .andExpect(status().isNoContent());
+
+            String today = jdbc.queryForObject(
+                    "select to_char(now() at time zone 'utc', 'YYYY-MM-DD')", String.class);
+            assertThat(storedPeriods(70001).getFirst()).containsEntry("start_date", today);
+        }
+
+        @Test
+        @DisplayName("refuses a change with no reason recorded")
+        void refusesAMissingRemark() throws Exception {
+            change("70001", "{\"status\":\"remedial\"}")
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("remark"));
+            assertThat(storedPeriods(70001)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("refuses a status it does not recognise")
+        void refusesAnUnknownStatus() throws Exception {
+            change("70001", "{\"status\":\"sacked\",\"remark\":\"Nope.\"}")
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("status"));
+            assertThat(storedPeriods(70001)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("refuses a status starting in the future")
+        void refusesAFutureStatus() throws Exception {
+            String future = LocalDate.now(ZoneOffset.UTC).plusDays(30).toString();
+            change("70001", "{\"status\":\"remedial\",\"remark\":\"Early.\","
+                            + "\"effectiveDate\":\"" + future + "\"}")
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("effectiveDate"));
+            assertThat(storedPeriods(70001)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("refuses a change dated before the status it replaces began")
+        void refusesABackdatedStatus() throws Exception {
+            change("70001", """
+                    {"status":"remedial","remark":"Support.","effectiveDate":"2026-03-09"}
+                    """).andExpect(status().isNoContent());
+
+            // The database holds this as a check constraint too; the test pins the
+            // message the user gets instead of it, and that nothing was written.
+            change("70001", """
+                    {"status":"lap","remark":"Too early.","effectiveDate":"2026-02-02"}
+                    """).andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("effectiveDate"))
+                    .andExpect(jsonPath("$.fieldErrors[0].message")
+                            .value(org.hamcrest.Matchers.containsString("2026-03-09")));
+
+            var periods = storedPeriods(70001);
+            assertThat(periods).hasSize(1);
+            assertThat(periods.getFirst()).containsEntry("txtstate", "A");
+        }
+
+        @Test
+        @DisplayName("refuses a status the trainee already holds")
+        void refusesTheStatusTheyAlreadyHold() throws Exception {
+            change("70001", "{\"status\":\"remedial\",\"remark\":\"Support.\"}")
+                    .andExpect(status().isNoContent());
+            change("70001", "{\"status\":\"remedial\",\"remark\":\"Again.\"}")
+                    .andExpect(status().isUnprocessableEntity());
+
+            // Refused rather than silently ignored, so the reason typed is not lost.
+            assertThat(storedPeriods(70001)).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("refuses to end a status a regular trainee does not hold")
+        void refusesToEndAStatusThatIsNotHeld() throws Exception {
+            change("70001", "{\"status\":\"regular\",\"remark\":\"Nothing to end.\"}")
+                    .andExpect(status().isUnprocessableEntity());
+            assertThat(storedPeriods(70001)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("refuses a trainee the caller cannot see")
+        void refusesAnOutOfScopeTrainee() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70003/trainee-status")
+                            .header("Authorization", bearer(facultyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"remedial\",\"remark\":\"Outside my batch.\"}"))
+                    .andExpect(status().isForbidden());
+            assertThat(storedPeriods(70003)).isEmpty();
+        }
+    }
+
+    @Nested
     @DisplayName("dashboard summary")
     class DashboardSummary {
 
@@ -884,14 +1254,14 @@ class PortalApiIntegrationTest {
         }
 
         @Test
-        @DisplayName("the three track counts always add up to the trainee count")
+        @DisplayName("the five status counts always add up to the trainee count")
         void trackCountsAreExhaustive() throws Exception {
-            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+            mvc.perform(patch("/api/assessments/trainees/70001/trainee-status")
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"status\":\"remedial\",\"remark\":\"Needs support.\"}"))
                     .andExpect(status().isNoContent());
-            mvc.perform(patch("/api/assessments/trainees/70002/lap-remedial")
+            mvc.perform(patch("/api/assessments/trainees/70002/trainee-status")
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"status\":\"lap\",\"remark\":\"Escalated.\"}"))
@@ -903,28 +1273,32 @@ class PortalApiIntegrationTest {
                     .andExpect(jsonPath("$.totals.remedial").value(1))
                     .andExpect(jsonPath("$.totals.lap").value(1))
                     .andExpect(jsonPath("$.totals.regular").value(1))
+                    .andExpect(jsonPath("$.totals.cleared").value(0))
+                    .andExpect(jsonPath("$.totals.others").value(0))
                     .andReturn().getResponse().getContentAsString();
 
             int trainees = JsonPath.read(body, "$.totals.trainees");
             int regular = JsonPath.read(body, "$.totals.regular");
             int remedial = JsonPath.read(body, "$.totals.remedial");
             int lap = JsonPath.read(body, "$.totals.lap");
+            int cleared = JsonPath.read(body, "$.totals.cleared");
+            int others = JsonPath.read(body, "$.totals.others");
 
-            assertThat(regular + remedial + lap).isEqualTo(trainees);
+            assertThat(regular + remedial + lap + cleared + others).isEqualTo(trainees);
         }
 
         @Test
         @DisplayName("a closed track returns the trainee to the regular count")
         void closedTrackReturnsToRegular() throws Exception {
-            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+            mvc.perform(patch("/api/assessments/trainees/70001/trainee-status")
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"status\":\"remedial\",\"remark\":\"Needs support.\"}"))
                     .andExpect(status().isNoContent());
-            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+            mvc.perform(patch("/api/assessments/trainees/70001/trainee-status")
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"status\":\"none\",\"remark\":\"Completed.\"}"))
+                            .content("{\"status\":\"regular\",\"remark\":\"Completed.\"}"))
                     .andExpect(status().isNoContent());
 
             mvc.perform(get("/api/dashboard/summary").header("Authorization", bearer(adminToken)))
@@ -941,6 +1315,462 @@ class PortalApiIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totals.trainees").value(2))
                     .andExpect(jsonPath("$.totals.batches").value(1));
+        }
+    }
+
+    @Nested
+    @DisplayName("trainee status bulk sheet")
+    class TraineeStatusUpload {
+
+        /** Downloads the sheet for one tab of the fixture's group. */
+        private String template(String status, String... examIds) throws Exception {
+            var request = get("/api/assessments/trainee-status/uploads/template")
+                    .header("Authorization", bearer(adminToken))
+                    .param("locationId", "KOC")
+                    .param("batchId", "9001")
+                    .param("lgId", "8001")
+                    .param("status", status);
+            for (String examId : examIds) {
+                request = request.param("examIds", examId);
+            }
+            return mvc.perform(request)
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+        }
+
+        /** Commits a sheet body as the admin. */
+        private ResultActions upload(String body) throws Exception {
+            return upload(body, adminToken);
+        }
+
+        private ResultActions upload(String body, String token)
+                throws Exception {
+            return mvc.perform(post("/api/assessments/trainee-status/uploads")
+                    .header("Authorization", bearer(token))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(body));
+        }
+
+        /** A one-row sheet body for the fixture's group. */
+        private String oneRow(String employeeId, String status, String remark, String date) {
+            String effectiveDate = date == null ? "" : ",\"effectiveDate\":\"" + date + "\"";
+            return """
+                    {"locationId":"KOC","batchId":9001,"lgId":8001,"rows":[
+                      {"employeeId":"%s","status":"%s","remark":"%s"%s}
+                    ]}
+                    """.formatted(employeeId, status, remark, effectiveDate);
+        }
+
+        private List<Map<String, Object>> storedPeriods(long employeeId) {
+            return jdbc.queryForList("""
+                    select txttrainee_status, txtstate, txtremark as remark,
+                           to_char(datestart_date, 'YYYY-MM-DD') as start_date
+                    from app_trainee_status where intemployee_id = ?
+                    order by inttrainee_status_id
+                    """, employeeId);
+        }
+
+        // ── The template ───────────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("the sheet is the tab on screen: its trainees, their marks, and blank columns to fill")
+        void sheetMirrorsTheTab() throws Exception {
+            // A mark to appear in the sheet, recorded the way the portal records one.
+            mvc.perform(patch("/api/assessments/trainees/70001")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"results\":{\"1\":{\"score\":50}}}"))
+                    .andExpect(status().isNoContent());
+
+            String csv = template("regular", "1");
+            var lines = csv.strip().split("\n");
+
+            // Identity, then the marks, then the status they hold, then the three
+            // columns the user is meant to type into.
+            assertThat(lines[0]).isEqualTo(
+                    "Emp ID,Name,Pre Assessment,Current Status,New Status,Effective Date,Remark");
+            assertThat(lines[1]).isEqualTo("70001,Aarav Nair,50 - B1,Regular,,,");
+            assertThat(lines[2]).isEqualTo("70002,Meera Iyer,,Regular,,,");
+            assertThat(lines).hasSize(3);
+        }
+
+        @Test
+        @DisplayName("a trainee holding no mark shows an empty cell, not a zero")
+        void missingMarkIsBlankNotZero() throws Exception {
+            assertThat(template("regular", "1")).contains("70001,Aarav Nair,,Regular,,,");
+        }
+
+        @Test
+        @DisplayName("one column per assessment asked for, in the order asked for")
+        void oneColumnPerAssessment() throws Exception {
+            var lines = template("regular", "2", "1").strip().split("\n");
+            assertThat(lines[0]).startsWith("Emp ID,Name,Mid Assessment,Pre Assessment,");
+        }
+
+        @Test
+        @DisplayName("the Regular tab excludes everyone holding a status")
+        void regularTabExcludesStatusHolders() throws Exception {
+            upload(oneRow("70001", "remedial", "Needs support.", "2026-02-02"))
+                    .andExpect(status().isOk());
+
+            assertThat(template("regular")).doesNotContain("70001");
+            assertThat(template("remedial")).contains("70001,Aarav Nair,Remedial,,,");
+            assertThat(template("remedial")).doesNotContain("70002");
+        }
+
+        @Test
+        @DisplayName("the Other tab names the status each trainee actually holds")
+        void otherTabNamesTheStatus() throws Exception {
+            upload(oneRow("70001", "resigned", "Left the organisation.", "2026-02-02"))
+                    .andExpect(status().isOk());
+
+            // All three exits share one tab, so the sheet has to say which is which.
+            assertThat(template("other")).contains("70001,Aarav Nair,Resigned,,,");
+        }
+
+        @Test
+        @DisplayName("faculty may download a sheet, and only for their own group")
+        void facultyMayDownloadTheirOwnGroup() throws Exception {
+            mvc.perform(get("/api/assessments/trainee-status/uploads/template")
+                            .header("Authorization", bearer(facultyToken))
+                            .param("batchId", "9001")
+                            .param("status", "regular"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Content-Disposition",
+                            "attachment; filename=\"trainee-status-template.csv\""))
+                    .andExpect(content().string(org.hamcrest.Matchers.containsString("70001,Aarav Nair")));
+
+            // Batch 9002 is not theirs. Refused, not silently emptied — the same
+            // answer the table gives when asked for a group outside the caller's scope.
+            mvc.perform(get("/api/assessments/trainee-status/uploads/template")
+                            .header("Authorization", bearer(facultyToken))
+                            .param("batchId", "9002")
+                            .param("status", "regular"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("an unknown assessment is refused rather than silently dropped")
+        void unknownAssessmentIsRefused() throws Exception {
+            mvc.perform(get("/api/assessments/trainee-status/uploads/template")
+                            .header("Authorization", bearer(adminToken))
+                            .param("status", "regular")
+                            .param("examIds", "999"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("examIds"));
+        }
+
+        // ── The commit ─────────────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("applies a sheet's changes through the same path as a single change")
+        void appliesTheSheet() throws Exception {
+            upload("""
+                    {"locationId":"KOC","batchId":9001,"lgId":8001,"rows":[
+                      {"employeeId":"70001","status":"remedial","remark":"Baseline below B1.",
+                       "effectiveDate":"2026-02-02"},
+                      {"employeeId":"70002","status":"lap","remark":"Needs more than remedial.",
+                       "effectiveDate":"2026-03-09"}
+                    ]}
+                    """)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.updated").value(2));
+
+            assertThat(storedPeriods(70001)).hasSize(1);
+            assertThat(storedPeriods(70001).getFirst())
+                    .containsEntry("txttrainee_status", "remedial")
+                    .containsEntry("txtstate", "A")
+                    .containsEntry("start_date", "2026-02-02");
+            assertThat(storedPeriods(70002).getFirst())
+                    .containsEntry("txttrainee_status", "lap");
+        }
+
+        @Test
+        @DisplayName("supersedes what the trainee held, keeping the history")
+        void supersedesTheHeldStatus() throws Exception {
+            upload(oneRow("70001", "remedial", "Needs support.", "2026-02-02"))
+                    .andExpect(status().isOk());
+            upload(oneRow("70001", "lap", "Escalated.", "2026-03-09"))
+                    .andExpect(status().isOk());
+
+            var periods = storedPeriods(70001);
+            assertThat(periods).hasSize(2);
+            assertThat(periods.get(0))
+                    .containsEntry("txttrainee_status", "remedial")
+                    .containsEntry("txtstate", "C")
+                    .containsEntry("remark", "Needs support.");
+            assertThat(periods.get(1))
+                    .containsEntry("txttrainee_status", "lap")
+                    .containsEntry("txtstate", "A");
+        }
+
+        @Test
+        @DisplayName("a blank date is dated today, so a filled status is never undated")
+        void blankDateMeansToday() throws Exception {
+            upload(oneRow("70001", "remedial", "Needs support.", null))
+                    .andExpect(status().isOk());
+
+            assertThat(storedPeriods(70001).getFirst())
+                    .containsEntry("start_date", LocalDate.now(ZoneOffset.UTC).toString());
+        }
+
+        @Test
+        @DisplayName("returning a trainee to regular closes the status and opens nothing")
+        void returningToRegularEndsTheStatus() throws Exception {
+            upload(oneRow("70001", "remedial", "Needs support.", "2026-02-02"))
+                    .andExpect(status().isOk());
+            upload(oneRow("70001", "regular", "Completed the programme.", "2026-04-01"))
+                    .andExpect(status().isOk());
+
+            // Regular is not a stored status: the period is closed, and the trainee
+            // holds nothing. Closing keeps the reason it was held, and the date it
+            // closed is what explains how they came to be regular again.
+            var periods = storedPeriods(70001);
+            assertThat(periods).hasSize(1);
+            assertThat(periods.getFirst())
+                    .containsEntry("txttrainee_status", "remedial")
+                    .containsEntry("txtstate", "C")
+                    .containsEntry("remark", "Needs support.");
+
+            assertThat(template("regular")).contains("70001,Aarav Nair,Regular,,,");
+        }
+
+        // ── Refusals ───────────────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("refuses the whole sheet when one row names a trainee outside the group")
+        void refusesAndWritesNothingWhenARowIsOutsideTheGroup() throws Exception {
+            // 70003 is in batch 9002. The valid first row must not be written:
+            // a half-applied sheet leaves the roster in a state nobody can explain.
+            upload("""
+                    {"locationId":"KOC","batchId":9001,"lgId":8001,"rows":[
+                      {"employeeId":"70001","status":"remedial","remark":"Needs support.",
+                       "effectiveDate":"2026-02-02"},
+                      {"employeeId":"70003","status":"lap","remark":"Not in this group.",
+                       "effectiveDate":"2026-02-02"}
+                    ]}
+                    """)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("rows[2].employeeId"));
+
+            assertThat(storedPeriods(70001)).isEmpty();
+            assertThat(storedPeriods(70003)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("faculty cannot upload for a group that is not theirs")
+        void facultyCannotUploadOutsideTheirBatch() throws Exception {
+            // The group is out of scope, so the sheet is refused before a single row
+            // is looked at — the scope check comes first on purpose.
+            upload("""
+                    {"locationId":"TRV","batchId":9002,"rows":[
+                      {"employeeId":"70003","status":"remedial","remark":"Out of scope.",
+                       "effectiveDate":"2026-02-02"}
+                    ]}
+                    """, facultyToken)
+                    .andExpect(status().isForbidden());
+
+            assertThat(storedPeriods(70003)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a trainee outside an in-scope group is refused by row")
+        void facultyCannotUploadATraineeOutsideTheirGroup() throws Exception {
+            // The group is theirs, the trainee is not: the sheet was generated from a
+            // roster, so a row naming someone else is a hand-edited file.
+            upload("""
+                    {"locationId":"KOC","batchId":9001,"lgId":8001,"rows":[
+                      {"employeeId":"70003","status":"remedial","remark":"Not in this group.",
+                       "effectiveDate":"2026-02-02"}
+                    ]}
+                    """, facultyToken)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].message")
+                            .value("70003 is not in the group this sheet was generated for."));
+
+            assertThat(storedPeriods(70003)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("refuses a trainee listed twice, which would contradict itself")
+        void refusesADuplicateTrainee() throws Exception {
+            upload("""
+                    {"locationId":"KOC","batchId":9001,"lgId":8001,"rows":[
+                      {"employeeId":"70001","status":"remedial","remark":"First.","effectiveDate":"2026-02-02"},
+                      {"employeeId":"70001","status":"lap","remark":"Second.","effectiveDate":"2026-03-09"}
+                    ]}
+                    """)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("rows[2].employeeId"));
+
+            assertThat(storedPeriods(70001)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("refuses the status the trainee already holds, rather than discarding the reason")
+        void refusesTheStatusAlreadyHeld() throws Exception {
+            upload(oneRow("70001", "remedial", "Needs support.", "2026-02-02"))
+                    .andExpect(status().isOk());
+
+            upload(oneRow("70001", "remedial", "Typed again by mistake.", "2026-03-09"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].message")
+                            .value("Employee 70001 already holds Remedial."));
+
+            // Still on the first period: the rejected sheet changed nothing.
+            assertThat(storedPeriods(70001)).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("refuses to end a status for a trainee who holds none")
+        void refusesEndingAStatusThatIsNotHeld() throws Exception {
+            upload(oneRow("70001", "regular", "Nothing to end.", "2026-02-02"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].message")
+                            .value("Employee 70001 is already regular — they hold no status to end."));
+        }
+
+        @Test
+        @DisplayName("refuses a date in the future")
+        void refusesAFutureDate() throws Exception {
+            upload(oneRow("70001", "remedial", "Needs support.", "2099-01-01"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("rows[1].effectiveDate"));
+        }
+
+        @Test
+        @DisplayName("refuses a date before the status it replaces began")
+        void refusesABackdatedDate() throws Exception {
+            upload(oneRow("70001", "remedial", "Needs support.", "2026-03-09"))
+                    .andExpect(status().isOk());
+
+            upload(oneRow("70001", "lap", "Before that status began.", "2026-02-02"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].message")
+                            .value("Employee 70001 has been on Remedial since 2026-03-09. "
+                                    + "Choose that date or later."));
+        }
+
+        @Test
+        @DisplayName("refuses a row with no reason, because an unexplained change is not auditable")
+        void refusesAMissingReason() throws Exception {
+            upload("""
+                    {"locationId":"KOC","batchId":9001,"rows":[
+                      {"employeeId":"70001","status":"remedial","remark":"   ","effectiveDate":"2026-02-02"}
+                    ]}
+                    """)
+                    .andExpect(status().isBadRequest());
+
+            assertThat(storedPeriods(70001)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("refuses an unknown status and a malformed date")
+        void refusesNonsenseValues() throws Exception {
+            upload("""
+                    {"locationId":"KOC","batchId":9001,"rows":[
+                      {"employeeId":"70001","status":"promoted","remark":"Not a status.",
+                       "effectiveDate":"2026-02-02"}
+                    ]}
+                    """)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("rows[0].status"));
+
+            upload("""
+                    {"locationId":"KOC","batchId":9001,"rows":[
+                      {"employeeId":"70001","status":"remedial","remark":"Bad date.",
+                       "effectiveDate":"02/02/2026"}
+                    ]}
+                    """)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("rows[0].effectiveDate"));
+        }
+
+        @Test
+        @DisplayName("refuses an empty sheet, which asks for nothing")
+        void refusesAnEmptySheet() throws Exception {
+            upload("""
+                    {"locationId":"KOC","batchId":9001,"rows":[]}
+                    """)
+                    .andExpect(status().isBadRequest());
+        }
+
+        // ── The preview lookup ─────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("the lookup answers with what each trainee holds now, and since when")
+        void lookupAnswersWithTheCurrentStatus() throws Exception {
+            upload(oneRow("70001", "remedial", "Needs support.", "2026-02-02"))
+                    .andExpect(status().isOk());
+
+            mvc.perform(post("/api/assessments/trainee-status/uploads/lookup")
+                            .header("Authorization", bearer(adminToken))
+                            .param("locationId", "KOC")
+                            .param("batchId", "9001")
+                            .param("lgId", "8001")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"employeeIds\":[70001,70002]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.trainees.length()").value(2))
+                    .andExpect(jsonPath("$.trainees[0].employeeId").value("70001"))
+                    .andExpect(jsonPath("$.trainees[0].name").value("Aarav Nair"))
+                    .andExpect(jsonPath("$.trainees[0].status").value("remedial"))
+                    .andExpect(jsonPath("$.trainees[0].startDate").value("2026-02-02"))
+                    // Nulls are what "holds nothing", and so Regular, looks like.
+                    .andExpect(jsonPath("$.trainees[1].status").doesNotExist())
+                    .andExpect(jsonPath("$.trainees[1].startDate").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("the lookup answers only about trainees the caller may see")
+        void lookupIsScoped() throws Exception {
+            // 70003 is in batch 9002, which is not the group asked about, so the
+            // lookup leaves them out rather than reporting their status.
+            mvc.perform(post("/api/assessments/trainee-status/uploads/lookup")
+                            .header("Authorization", bearer(adminToken))
+                            .param("batchId", "9001")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"employeeIds\":[70001,70003]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.trainees.length()").value(1))
+                    .andExpect(jsonPath("$.trainees[0].employeeId").value("70001"));
+        }
+
+        @Test
+        @DisplayName("the lookup is readable with the view permission alone")
+        void lookupNeedsOnlyTheViewPermission() throws Exception {
+            mvc.perform(post("/api/assessments/trainee-status/uploads/lookup")
+                            .header("Authorization", bearer(facultyToken))
+                            .param("batchId", "9001")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"employeeIds\":[70001]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.trainees.length()").value(1));
+        }
+
+        @Test
+        @DisplayName("the lookup refuses an empty list rather than answering everything")
+        void lookupRefusesAnEmptyList() throws Exception {
+            mvc.perform(post("/api/assessments/trainee-status/uploads/lookup")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"employeeIds\":[]}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("a sheet is not readable or writable without signing in")
+        void requiresAuthentication() throws Exception {
+            mvc.perform(get("/api/assessments/trainee-status/uploads/template"))
+                    .andExpect(status().isUnauthorized());
+            mvc.perform(post("/api/assessments/trainee-status/uploads")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"rows\":[]}"))
+                    .andExpect(status().isUnauthorized());
+            mvc.perform(post("/api/assessments/trainee-status/uploads/lookup")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"employeeIds\":[70001]}"))
+                    .andExpect(status().isUnauthorized());
         }
     }
 

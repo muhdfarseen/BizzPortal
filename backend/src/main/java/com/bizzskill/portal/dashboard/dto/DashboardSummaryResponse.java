@@ -21,12 +21,18 @@ public record DashboardSummaryResponse(Totals totals, List<LocationBreakdown> lo
     /**
      * Headline counters.
      *
-     * <p>{@code regular}, {@code remedial} and {@code lap} always sum to
-     * {@code trainees}: a trainee is on at most one track, and being on none is the
-     * regular case. Deriving {@code regular} this way rather than counting it keeps
-     * that invariant true by construction instead of by agreement.
+     * <p>{@code regular}, {@code remedial}, {@code lap}, {@code cleared} and
+     * {@code others} always sum to {@code trainees}: a trainee holds at most one
+     * status, and holding none is the regular case. Deriving {@code regular} this
+     * way rather than counting it keeps that invariant true by construction instead
+     * of by agreement.
+     *
+     * @param regular trainees holding no status at all.
+     * @param cleared trainees who finished successfully.
+     * @param others  trainees who left — discontinued, purged or resigned.
      */
-    public record Totals(int trainees, int batches, int regular, int remedial, int lap) {
+    public record Totals(
+            int trainees, int batches, int regular, int remedial, int lap, int cleared, int others) {
     }
 
     /**

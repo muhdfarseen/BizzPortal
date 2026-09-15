@@ -142,4 +142,65 @@ describe('SelectComponent', () => {
 
     expect(document.querySelector('.select-empty')?.textContent).toContain('No options available');
   });
+
+  it('keeps Escape to itself while the dropdown is open', async () => {
+    // Every modal in the portal dismisses itself on `document:keydown.escape`.
+    // Without this, Escape meant for the dropdown would carry on up and close the
+    // modal around it, throwing away whatever the user had typed into that modal.
+    const fixture = createFixture();
+    const seenAtDocument: KeyboardEvent[] = [];
+    const listener = (event: KeyboardEvent) => seenAtDocument.push(event);
+    document.addEventListener('keydown', listener);
+
+    try {
+      const options = await openDropdown(fixture);
+      options[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await flushOverlay();
+
+      expect(seenAtDocument.filter((event) => event.key === 'Escape')).toEqual([]);
+    } finally {
+      document.removeEventListener('keydown', listener);
+    }
+  });
+
+  it('keeps Escape to itself when the key is pressed on the trigger', async () => {
+    // The real case: the browser leaves focus on the trigger, not in the list, so
+    // the key never passes through the dropdown element on its way to the document.
+    const fixture = createFixture();
+    const seenAtDocument: KeyboardEvent[] = [];
+    const listener = (event: KeyboardEvent) => seenAtDocument.push(event);
+    document.addEventListener('keydown', listener);
+
+    try {
+      await openDropdown(fixture);
+      triggerFor(fixture).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+      await flushOverlay();
+
+      expect(seenAtDocument.filter((event) => event.key === 'Escape')).toEqual([]);
+    } finally {
+      document.removeEventListener('keydown', listener);
+    }
+  });
+
+  it('lets Escape through once the dropdown is closed', async () => {
+    // The guard is about the open dropdown, not about Escape in general: a modal
+    // must still be dismissible from inside a select that is not showing its list.
+    const fixture = createFixture();
+    const seenAtDocument: KeyboardEvent[] = [];
+    const listener = (event: KeyboardEvent) => seenAtDocument.push(event);
+    document.addEventListener('keydown', listener);
+
+    try {
+      triggerFor(fixture).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+      await flushOverlay();
+
+      expect(seenAtDocument.filter((event) => event.key === 'Escape')).toHaveLength(1);
+    } finally {
+      document.removeEventListener('keydown', listener);
+    }
+  });
 });

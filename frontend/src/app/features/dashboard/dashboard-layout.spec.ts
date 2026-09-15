@@ -20,7 +20,7 @@ const ROUTES = [
 ];
 
 /** The tabs every role may open — the four the administrative roles add to. */
-const SHARED_TABS = ['Home', 'Assessments', 'LAP / Remedial', 'Reports'];
+const SHARED_TABS = ['Home', 'Assessments', 'Trainee Status', 'Reports'];
 
 describe('DashboardLayoutComponent', () => {
   let http: HttpTestingController;
@@ -200,15 +200,18 @@ describe('DashboardLayoutComponent', () => {
         'Dashboard',
         'View Assessments',
         'Record Assessment Results',
-        'View LAP / Remedial',
+        'View Trainee Status',
+        'Manage Trainee Status',
         'Reports',
       ]);
-      expect(names).not.toContain('Manage LAP / Remedial');
+      // Still held back from every role below Super Admin.
+      expect(names).not.toContain('User Management');
+      expect(names).not.toContain('Exam Configuration');
       expect(host(fixture).querySelector('.assigned-access-value')?.textContent?.trim()).toBe(
         scopeSummary('faculty', ['BLR'], ['103']),
       );
       expect(host(fixture).querySelector('.status-indicator')?.textContent).toContain(
-        '5 permissions active',
+        '6 permissions active',
       );
     });
 
@@ -224,7 +227,7 @@ describe('DashboardLayoutComponent', () => {
       expect(host(fixture).querySelector('.assigned-access-value')?.textContent?.trim()).toBe(
         scopeSummary('location-admin', ['KOC'], []),
       );
-      expect(names).toContain('Manage LAP / Remedial');
+      expect(names).toContain('Manage Trainee Status');
       expect(names).not.toContain('User Management');
       expect(names).not.toContain('Exam Configuration');
     });

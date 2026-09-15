@@ -9,7 +9,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * <p>Reads the training organisation (locations, batches, learning groups and
  * participants) from the tables owned by the existing technical assessment
  * portal, and owns the assessment configuration, results, CEFR mapping and
- * LAP/Remedial data on top of them.
+ * trainee status data on top of them.
  *
  * <p>The database schema is managed entirely by Flyway
  * ({@code src/main/resources/db/migration}); Hibernate is configured to

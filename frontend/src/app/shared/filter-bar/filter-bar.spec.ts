@@ -228,7 +228,7 @@ describe('FilterBarComponent', () => {
     signIn(SIGN_IN.programManager);
     const fixture = createFixture();
 
-    // `allowAll` is off by default: the assessments and LAP / Remedial pages
+    // `allowAll` is off by default: the assessments and Trainee status pages
     // are scoped to one LG and must not be given an organisation-wide choice.
     const options = await openDropdown(fixture, 0);
 

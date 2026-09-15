@@ -1,6 +1,6 @@
 import { Component, computed, inject, input, signal, viewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { TraineeAssessment } from '../../../core/models/assessment.model';
+import { TraineeAssessment, todayIsoDate } from '../../../core/models/assessment.model';
 import { DEFAULT_PAGE_SIZE, FIRST_PAGE, SortDirection } from '../../../core/models/page.model';
 import { AssessmentService } from '../../../core/services/assessment.service';
 import { AuthService } from '../../../core/services/auth.service';
@@ -63,7 +63,7 @@ export class AssessmentResultsComponent {
   private readonly auth = inject(AuthService);
   private readonly toasts = inject(ToastService);
 
-  /** Section heading, e.g. `Assessments` or `LAP / Remedial`. */
+  /** Section heading, e.g. `Assessments` or `Trainee Status`. */
   readonly title = input.required<string>();
 
   /** The exams configured for the portal (Pre / Mid / Post today). */
@@ -277,6 +277,9 @@ export class AssessmentResultsComponent {
             results[examId] = {
               score: result.score,
               cefr: this.assessments.levelFor(result.score),
+              // Inline entry is recorded against the day it is keyed in, which is
+              // what the server stores; keep the row we just updated in step.
+              assessedOn: todayIsoDate(),
             };
           } else {
             delete results[examId];

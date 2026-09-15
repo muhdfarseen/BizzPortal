@@ -156,14 +156,66 @@ export interface AssessmentResult {
   score: number;
   /** CEFR level derived from (or recorded alongside) the score. */
   cefr: string;
+  /**
+   * ISO date (`yyyy-MM-dd`) the exam was conducted, or null for results recorded
+   * before the portal captured one.
+   */
+  assessedOn: string | null;
 }
 
 /**
- * The LAP / Remedial tracks. Trainees start on `none`, are moved to `remedial`
- * when their results warrant extra support, then on to `lap` — or back to
- * `none` when a track is closed.
+ * The statuses a trainee can hold.
+ *
+ * `regular` is not one of them: a trainee progressing through their batch
+ * normally holds no status at all, so it is represented by the absence of
+ * {@link TraineeAssessment.status} rather than by a stored value. It appears in
+ * {@link StatusFilter} because the screen offers it as a tab, and in
+ * {@link TraineeStatusChange} because "no longer needs support" is a change a
+ * user can make.
  */
-export type LapRemedialStatus = 'none' | 'remedial' | 'lap';
+export type TraineeStatus = 'remedial' | 'lap' | 'cleared' | 'discontinued' | 'purged' | 'resigned';
+
+/**
+ * The status a user can move a trainee to: any of {@link TraineeStatus}, or
+ * `regular` to end whatever they hold.
+ */
+export type TraineeStatusChange = TraineeStatus | 'regular';
+
+/**
+ * The tabs of the Trainee status page.
+ *
+ * Mirrors the API's `status` query parameter. `other` is one tab standing for
+ * the three ways a trainee leaves; `regular` stands for holding nothing at all.
+ */
+export type StatusFilter = 'regular' | 'remedial' | 'lap' | 'cleared' | 'other';
+
+/** The statuses the `other` tab covers, in the order the dialog offers them. */
+export const OTHER_STATUSES: readonly TraineeStatus[] = ['discontinued', 'purged', 'resigned'];
+
+/** Every status in the order they are listed to a user, the ordinary path first. */
+export const TRAINEE_STATUSES: readonly TraineeStatus[] = [
+  'remedial',
+  'lap',
+  'cleared',
+  ...OTHER_STATUSES,
+];
+
+/** How a status is written on screen: `lap` is an acronym, not a word. */
+export function statusLabel(status: TraineeStatusChange): string {
+  switch (status) {
+    case 'regular':
+      return 'Regular';
+    case 'lap':
+      return 'LAP';
+    default:
+      return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+}
+
+/** The label of the tab a status falls under. */
+export function statusTabLabel(tab: StatusFilter): string {
+  return tab === 'other' ? 'Other' : statusLabel(tab);
+}
 
 /** One trainee row of the assessment table. */
 export interface TraineeAssessment {
@@ -174,23 +226,22 @@ export interface TraineeAssessment {
   /** Results keyed by {@link AssessmentExam.id}; an exam may have no result yet. */
   results: Record<string, AssessmentResult | undefined>;
   /**
-   * LAP / Remedial track the trainee is currently on; absent means `none`
-   * (trainees start there and return there when a track is closed).
+   * The status the trainee currently holds; absent means they hold none, which is
+   * the ordinary case and what the Regular tab shows.
    */
-  status?: LapRemedialStatus;
+  status?: TraineeStatus;
   /**
-   * ISO date (`yyyy-MM-dd`) the trainee started their current track — recorded
-   * when they are moved onto Remedial or LAP, shown in that track's table.
+   * ISO date (`yyyy-MM-dd`) the trainee entered their current status, or — when
+   * they hold none — the day their last one ended.
    */
   startDate?: string;
   /**
-   * ISO date (`yyyy-MM-dd`) the trainee closed their LAP / Remedial track —
-   * recorded when a track is closed.
+   * ISO date (`yyyy-MM-dd`) the trainee's last status ended. Only set when they
+   * hold none, since a status they still hold has no end.
    */
   closeDate?: string;
   /**
-   * Remark recorded with the trainee's last track change — the reason they are
-   * on their current track, shown in the Remedial and LAP tables.
+   * Why the trainee holds their current status, or why their last one ended.
    */
   remark?: string;
 }

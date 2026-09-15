@@ -5,7 +5,7 @@ import { By } from '@angular/platform-browser';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { vi } from 'vitest';
-import { AssessmentExam } from '../../../core/models/assessment.model';
+import { AssessmentExam, formatIsoDate, todayIsoDate } from '../../../core/models/assessment.model';
 import { FileDownloadService } from '../../../core/services/file-download.service';
 import { ToastService } from '../../../core/ui/toast.service';
 import { AssessmentUploadDialogComponent, AssessmentUploadSave } from './assessment-upload-dialog';
@@ -274,6 +274,8 @@ describe('AssessmentUploadDialogComponent', () => {
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({
       examId: '1',
+      // Defaults to today, so the common case needs no thought from the user.
+      assessedOn: todayIsoDate(),
       locationId: 'BLR',
       batchId: 103,
       lgId: 1004,
@@ -286,6 +288,51 @@ describe('AssessmentUploadDialogComponent', () => {
     expect(target(fixture).saves).toHaveLength(1);
     expect(target(fixture).saves[0]).toMatchObject({ examId: '1', count: 1, filter: FILTER });
     expect(toastMessages()).toEqual(['1 score imported']);
+  });
+
+  it('offers the conducted date, defaulted to today and capped there', () => {
+    const fixture = createFixture();
+    chooseGroupAndAssessment(fixture);
+
+    const input = host(fixture).querySelector<HTMLInputElement>('input[type="date"]');
+    expect(input).not.toBeNull();
+    expect(input?.value).toBe(todayIsoDate());
+    // An exam cannot have been conducted tomorrow, so the picker will not offer it.
+    expect(input?.getAttribute('max')).toBe(todayIsoDate());
+    expect(input?.getAttribute('aria-label')).toBe('Exam conducted on');
+  });
+
+  it('records the date the user corrects it to, not the day of the upload', async () => {
+    const fixture = createFixture();
+    chooseGroupAndAssessment(fixture);
+    const trainee = firstTrainee();
+
+    const input = host(fixture).querySelector<HTMLInputElement>('input[type="date"]')!;
+    input.value = '2026-05-04';
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+
+    await upload(fixture, csv([[trainee.employeeId, trainee.name, '70']]));
+    host(fixture).querySelector<HTMLButtonElement>('.modal-footer .btn-primary')?.click();
+    fixture.detectChanges();
+
+    const request = http.expectOne(`${API_BASE}/assessments/uploads`);
+    expect(request.request.body.assessedOn).toBe('2026-05-04');
+    request.flush({ saved: 1 });
+  });
+
+  it('shows the conducted date in the preview, so it is confirmed before the write', async () => {
+    const fixture = createFixture();
+    chooseGroupAndAssessment(fixture);
+
+    const input = host(fixture).querySelector<HTMLInputElement>('input[type="date"]')!;
+    input.value = '2026-05-04';
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+
+    await upload(fixture, csv([[ROSTER[0].employeeId, ROSTER[0].name, '70']]));
+
+    expect(host(fixture).textContent).toContain(formatIsoDate('2026-05-04'));
   });
 
   it('confirms a multi-row import with its count', async () => {
@@ -342,6 +389,30 @@ describe('AssessmentUploadDialogComponent', () => {
 
     expect(host(fixture).querySelector('.preview-table')).toBeNull();
     expect(host(fixture).textContent).toContain('Choose the group and the assessment');
+    // The group and assessment are still chosen: the controls are kept mounted
+    // precisely so the filter bar cannot overwrite the selection with a fresh
+    // default on the way back.
+    expect(dialog(fixture).canUseGroup()).toBe(true);
+  });
+
+  it('shows why the server refused the upload without leaving the preview', async () => {
+    const fixture = createFixture();
+    chooseGroupAndAssessment(fixture);
+    await upload(fixture, csv([[firstTrainee().employeeId, firstTrainee().name, '70']]));
+
+    button(fixture, '.modal-footer .btn-primary').click();
+    http
+      .expectOne(`${API_BASE}/assessments/uploads`)
+      .flush(
+        { message: 'Those results changed a moment ago.' },
+        { status: 409, statusText: 'Conflict' },
+      );
+    fixture.detectChanges();
+
+    expect(host(fixture).querySelector('.alert--error')?.textContent).toContain(
+      'Those results changed a moment ago.',
+    );
+    expect(host(fixture).querySelector('.preview-table')).not.toBeNull();
   });
 
   it('reports that it was dismissed', () => {

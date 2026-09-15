@@ -6,7 +6,13 @@
 
 <ng-icon name="reiconChevronDown" size="16" class="select-chevron" />
 
-<div *ngpSelectPortal ngpSelectDropdown>
+<!--
+  While the dropdown is open, Escape is the dropdown's: it closes the list and
+  stops there. Without the stopPropagation it would carry on to any
+  `document:keydown.escape` listener — the one every modal in the portal installs
+  — and dismiss the modal too, discarding whatever the user had typed into it.
+-->
+<div *ngpSelectPortal ngpSelectDropdown (keydown.escape)="$event.stopPropagation()">
   @for (option of options(); track option.value) {
     <div [ngpSelectOptionValue]="option.value" ngpSelectOption>
       {{ option.label }}

@@ -4,13 +4,23 @@ import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 
-/** The headline counters of `GET /api/dashboard/summary`. */
+/**
+ * The headline counters of `GET /api/dashboard/summary`.
+ *
+ * `regular`, `remedial`, `lap`, `cleared` and `others` always sum to `trainees`:
+ * a trainee holds at most one status, and holding none is the regular case.
+ */
 export interface DashboardTotals {
   trainees: number;
   batches: number;
+  /** Trainees holding no status at all. */
   regular: number;
   remedial: number;
   lap: number;
+  /** Trainees who finished successfully. */
+  cleared: number;
+  /** Trainees who left — discontinued, purged or resigned. */
+  others: number;
 }
 
 /** One location's contribution to the summary. */
@@ -37,7 +47,7 @@ export interface DashboardFilter {
 }
 
 const EMPTY_SUMMARY: DashboardSummary = {
-  totals: { trainees: 0, batches: 0, regular: 0, remedial: 0, lap: 0 },
+  totals: { trainees: 0, batches: 0, regular: 0, remedial: 0, lap: 0, cleared: 0, others: 0 },
   locations: [],
 };
 

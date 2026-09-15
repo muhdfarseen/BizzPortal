@@ -27,10 +27,10 @@ export const routes: Routes = [
           ),
       },
       {
-        path: 'lap-remedial',
+        path: 'trainee-status',
         loadComponent: () =>
-          import('./features/dashboard/pages/lap-remedial/lap-remedial').then(
-            (m) => m.LapRemedialComponent,
+          import('./features/dashboard/pages/trainee-status/trainee-status').then(
+            (m) => m.TraineeStatusComponent,
           ),
       },
       {
