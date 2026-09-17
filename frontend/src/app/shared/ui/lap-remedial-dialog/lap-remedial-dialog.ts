@@ -65,7 +65,7 @@ export class LapRemedialDialogComponent {
   readonly startDate = this.date;
 
   /** Whether the change moves the trainee onto a track (rather than closing one). */
-  readonly isMove = computed(() => this.request().status !== 'none');
+  readonly isMove = computed(() => this.request().status !== 'none' && this.request().status !== 'cleared');
 
   /** Label for the date field: 'Start Date' when moving onto a track, 'Close Date' when closing a track. */
   readonly dateLabel = computed(() => (this.isMove() ? 'Start Date' : 'Close Date'));
@@ -87,7 +87,7 @@ export class LapRemedialDialogComponent {
       case 'lap':
         return `${trainee.name} will be moved to LAP`;
       default:
-        return `${trainee.name} has completed the lap cycle`;
+        return `${trainee.name} will be marked as Cleared`;
     }
   });
 

@@ -135,9 +135,22 @@ public final class TraineeRosterSpecifications {
 
             open.select(track.get("intLapRemedialId")).where(parts.toArray(new Predicate[0]));
 
-            // "No track" is the same query negated, which is why the track filter
-            // needs no join and no null check on the participant.
-            return filter == TrackFilter.NONE ? builder.not(builder.exists(open)) : builder.exists(open);
+            // "No track" is the same query negated.
+            // CLEARED means they have no open track, but they DO have a closed track.
+            // NONE means they have no open track, and they DO NOT have a closed track.
+            
+            Subquery<Long> closed = query.subquery(Long.class);
+            Root<AppLapRemedial> closedTrack = closed.from(AppLapRemedial.class);
+            closed.select(closedTrack.get("intLapRemedialId")).where(
+                    builder.equal(closedTrack.get("intEmployeeId"), root.get("intEmployeeId")),
+                    builder.equal(closedTrack.get("txtStatus"), LapStatus.CLOSED)
+            );
+
+            return switch (filter) {
+                case CLEARED -> builder.and(builder.not(builder.exists(open)), builder.exists(closed));
+                case NONE -> builder.and(builder.not(builder.exists(open)), builder.not(builder.exists(closed)));
+                default -> builder.exists(open);
+            };
         };
     }
 }

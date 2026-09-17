@@ -18,7 +18,7 @@ import {
   LapRemedialDialogComponent,
 } from '../../../../shared/ui/lap-remedial-dialog/lap-remedial-dialog';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { reiconSearchNormal2 } from '@ng-icons/reicon';
+import { reiconSearchNormal2, reiconCloseCircle } from '@ng-icons/reicon';
 
 /** The track tabs of the page, in display order. */
 const TRACK_TABS: readonly { status: LapRemedialStatus; label: string }[] = [
@@ -29,16 +29,21 @@ const TRACK_TABS: readonly { status: LapRemedialStatus; label: string }[] = [
 
 /** Row actions offered on every row of a tab, keyed by the tab's track. */
 const TAB_ACTIONS: Record<LapRemedialStatus, readonly AssessmentRowAction[]> = {
-  none: [{ id: 'move-to-remedial', label: 'Move to Remedial', variant: 'primary' }],
-  remedial: [{ id: 'move-to-lap', label: 'Move to LAP', variant: 'primary' }],
+  none: [{ id: 'move-to-remedial', label: 'Move to Remedial', variant: 'secondary' }],
+  remedial: [
+    { id: 'move-to-lap', label: 'Move to LAP', variant: 'secondary' },
+    { id: 'close-remedial', label: 'Close Remedial', variant: 'secondary' },
+  ],
   lap: [{ id: 'close-lap', label: 'Close LAP', variant: 'secondary' }],
+  cleared: [],
 };
 
 /** The track a row action moves a trainee onto. */
 const ACTION_TARGETS: Record<string, LapRemedialStatus> = {
   'move-to-remedial': 'remedial',
   'move-to-lap': 'lap',
-  'close-lap': 'none',
+  'close-remedial': 'cleared',
+  'close-lap': 'cleared',
 };
 
 /** Guidance for a tab that holds no trainees. */
@@ -46,6 +51,7 @@ const EMPTY_TAB_HINTS: Record<LapRemedialStatus, string> = {
   none: 'No trainees without a LAP / Remedial track for this group.',
   remedial: 'No trainees are on Remedial for this group.',
   lap: 'No trainees are on LAP for this group.',
+  cleared: 'No trainees have cleared LAP / Remedial for this group.',
 };
 
 /**
@@ -75,7 +81,7 @@ const SORT_KEYS: Record<string, string> = {
   selector: 'app-lap-remedial',
   standalone: true,
   imports: [FilterBarComponent, AssessmentTableComponent, LapRemedialDialogComponent, NgIcon],
-  providers: [provideIcons({ reiconSearchNormal2 })],
+  providers: [provideIcons({ reiconSearchNormal2, reiconCloseCircle })],
   templateUrl: './lap-remedial.html',
   styleUrl: './lap-remedial.css',
 })
@@ -83,6 +89,14 @@ export class LapRemedialComponent {
   private readonly assessments = inject(AssessmentService);
   private readonly auth = inject(AuthService);
   private readonly toasts = inject(ToastService);
+
+  private searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** What the search box shows. */
+  protected readonly draftQuery = signal('');
+
+  /** Whether an applied search is narrowing the grid. */
+  readonly isSearching = computed(() => this.search().trim() !== '');
 
   /** The exams configured for the portal (Pre / Mid / Post today). */
   readonly exams = this.assessments.exams;
@@ -237,11 +251,25 @@ export class LapRemedialComponent {
   onSearchChange(term: string): void {
     const filter = this.searchedFilter();
     this.search.set(term);
+    this.draftQuery.set(term);
     if (!filter) {
       return;
     }
     this.pageIndex.set(FIRST_PAGE);
     this.loadTrainees(filter);
+  }
+
+  onSearchInput(event: Event): void {
+    const value = (event.target as HTMLInputElement).value;
+    this.draftQuery.set(value);
+    clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => this.onSearchChange(value), 300);
+  }
+
+  clearSearch(): void {
+    clearTimeout(this.searchTimer);
+    this.draftQuery.set('');
+    this.onSearchChange('');
   }
 
   onSortChange(change: AssessmentSortChange): void {
@@ -326,6 +354,8 @@ export class LapRemedialComponent {
         return 'Moved to LAP';
       case 'none':
         return 'Removed from LAP / Remedial';
+      case 'cleared':
+        return 'Marked as Cleared';
     }
   }
 }

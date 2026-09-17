@@ -248,6 +248,9 @@ export class AssessmentTableComponent {
   /** The search the rows were loaded for; `''` when none is applied. */
   readonly searchQuery = input('');
 
+  /** Whether the search toolbar should be hidden. */
+  readonly hideSearch = input(false);
+
   /**
    * Column ids the host can order by server-side.
    *

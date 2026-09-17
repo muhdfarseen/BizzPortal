@@ -15,7 +15,7 @@ import jakarta.validation.constraints.Size;
  */
 public record LapRemedialRequest(
         @NotBlank(message = "Choose a track.")
-        @Pattern(regexp = "none|remedial|lap", message = "Choose none, remedial or lap.")
+        @Pattern(regexp = "none|remedial|lap|cleared", message = "Choose none, remedial, lap, or cleared.")
         String status,
 
         @Size(max = 300, message = "Use 300 characters or fewer.")

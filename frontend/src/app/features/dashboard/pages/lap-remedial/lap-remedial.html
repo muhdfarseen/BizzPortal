@@ -10,19 +10,44 @@
   </div>
 
   @if (hasSearched()) {
-    <div class="track-tabs" role="tablist" aria-label="LAP / Remedial tracks">
-      @for (tab of trackTabs; track tab.status) {
-        <button
-          type="button"
-          role="tab"
-          class="track-tab"
-          [class.is-active]="activeTab() === tab.status"
-          [attr.aria-selected]="activeTab() === tab.status ? 'true' : 'false'"
-          (click)="selectTab(tab.status)"
-        >
-          {{ tab.label }}
-        </button>
-      }
+    <div class="tabs-and-search">
+      <div class="track-tabs" role="tablist" aria-label="LAP / Remedial tracks">
+        @for (tab of trackTabs; track tab.status) {
+          <button
+            type="button"
+            role="tab"
+            class="track-tab"
+            [class.is-active]="activeTab() === tab.status"
+            [attr.aria-selected]="activeTab() === tab.status ? 'true' : 'false'"
+            (click)="selectTab(tab.status)"
+          >
+            {{ tab.label }}
+          </button>
+        }
+      </div>
+
+      <div class="lap-search">
+        <ng-icon name="reiconSearchNormal2" size="15" class="lap-search-icon" aria-hidden="true" />
+        <input
+          type="search"
+          class="lap-search-input"
+          [value]="draftQuery()"
+          placeholder="Search by name or employee ID"
+          aria-label="Search trainees by name or employee ID"
+          (input)="onSearchInput($event)"
+        />
+        @if (isSearching()) {
+          <button
+            type="button"
+            class="lap-search-clear"
+            aria-label="Clear search"
+            title="Clear search"
+            (click)="clearSearch()"
+          >
+            <ng-icon name="reiconCloseCircle" size="15" />
+          </button>
+        }
+      </div>
     </div>
 
     @if (showTable()) {
@@ -42,9 +67,9 @@
           [totalElements]="totalElements()"
           [loading]="loading()"
           [searchQuery]="search()"
+          [hideSearch]="true"
           (action)="onAction($event)"
           (pageChange)="onPageChange($event)"
-          (searchChange)="onSearchChange($event)"
           (sortChange)="onSortChange($event)"
         />
       </section>

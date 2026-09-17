@@ -51,7 +51,7 @@ public class LapRemedialService {
         Optional<AppLapRemedial> open =
                 placements.findByIntEmployeeIdAndTxtStatus(trainee.getIntEmployeeId(), LapStatus.OPEN);
 
-        if ("none".equals(request.status())) {
+        if ("none".equals(request.status()) || "cleared".equals(request.status())) {
             open.ifPresent(track -> {
                 track.close(remark, parseDate(request.closeDate(), today));
                 placements.save(track);

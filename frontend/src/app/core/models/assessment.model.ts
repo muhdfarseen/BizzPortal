@@ -163,7 +163,7 @@ export interface AssessmentResult {
  * when their results warrant extra support, then on to `lap` — or back to
  * `none` when a track is closed.
  */
-export type LapRemedialStatus = 'none' | 'remedial' | 'lap';
+export type LapRemedialStatus = 'none' | 'remedial' | 'lap' | 'cleared';
 
 /** One trainee row of the assessment table. */
 export interface TraineeAssessment {

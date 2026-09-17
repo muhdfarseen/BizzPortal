@@ -23,13 +23,16 @@ public enum TrackFilter {
     /** An open LAP track. */
     LAP,
 
-    /** No open track at all. */
+    /** No open track at all, but has a closed track. */
+    CLEARED,
+
+    /** No open track and no closed track. */
     NONE;
 
     /**
      * Reads the {@code status} query parameter, where absent means "do not filter".
      *
-     * @throws RequestValidationException if the value is not one of the three.
+     * @throws RequestValidationException if the value is not one of the values.
      */
     public static TrackFilter parse(String raw) {
         if (raw == null || raw.isBlank()) {
@@ -39,7 +42,7 @@ public enum TrackFilter {
             return valueOf(raw.trim().toUpperCase());
         } catch (IllegalArgumentException unknown) {
             throw new RequestValidationException(
-                    List.of(new FieldViolation("status", "Status must be one of: remedial, lap, none.")));
+                    List.of(new FieldViolation("status", "Status must be one of: remedial, lap, cleared, none.")));
         }
     }
 
@@ -48,7 +51,7 @@ public enum TrackFilter {
         return switch (this) {
             case REMEDIAL -> LapTrack.REMEDIAL;
             case LAP -> LapTrack.LAP;
-            case NONE -> null;
+            case CLEARED, NONE -> null;
         };
     }
 }

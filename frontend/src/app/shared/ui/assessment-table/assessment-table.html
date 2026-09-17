@@ -1,29 +1,31 @@
 <div class="table-card" [class.is-loading]="loading()" [attr.aria-busy]="loading() ? 'true' : null">
   <!-- ── Search ─────────────────────────────────────────────── -->
-  <div class="table-toolbar">
-    <div class="table-search">
-      <ng-icon name="reiconSearchNormal2" size="15" class="table-search-icon" aria-hidden="true" />
-      <input
-        type="search"
-        class="table-search-input"
-        [value]="draftQuery()"
-        placeholder="Search by name or employee ID"
-        aria-label="Search trainees by name or employee ID"
-        (input)="onSearchInput($event)"
-      />
-      @if (isSearching()) {
-        <button
-          type="button"
-          class="table-search-clear"
-          aria-label="Clear search"
-          title="Clear search"
-          (click)="clearSearch()"
-        >
-          <ng-icon name="reiconCloseCircle" size="15" />
-        </button>
-      }
+  @if (!hideSearch()) {
+    <div class="table-toolbar">
+      <div class="table-search">
+        <ng-icon name="reiconSearchNormal2" size="15" class="table-search-icon" aria-hidden="true" />
+        <input
+          type="search"
+          class="table-search-input"
+          [value]="draftQuery()"
+          placeholder="Search by name or employee ID"
+          aria-label="Search trainees by name or employee ID"
+          (input)="onSearchInput($event)"
+        />
+        @if (isSearching()) {
+          <button
+            type="button"
+            class="table-search-clear"
+            aria-label="Clear search"
+            title="Clear search"
+            (click)="clearSearch()"
+          >
+            <ng-icon name="reiconCloseCircle" size="15" />
+          </button>
+        }
+      </div>
     </div>
-  </div>
+  }
 
   <!-- ── Grid ───────────────────────────────────────────────── -->
   <div class="table-scroll">
