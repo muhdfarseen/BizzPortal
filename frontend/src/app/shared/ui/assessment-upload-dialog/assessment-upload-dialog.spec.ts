@@ -285,6 +285,7 @@ describe('AssessmentUploadDialogComponent', () => {
       locationId: 'BLR',
       batchId: 103,
       lgId: 1004,
+      assessedOn: new Date().toISOString().slice(0, 10),
       rows: [{ employeeId: trainee.employeeId, score: 70 }],
     });
     request.flush({ saved: 1 });

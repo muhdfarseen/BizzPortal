@@ -163,7 +163,7 @@ public class AssessmentUploadService {
         String actor = caller.username();
         for (Map.Entry<Long, Integer> entry : pending.entrySet()) {
             resultWriter.write(
-                    entry.getKey(), assessment.getIntAssessmentId(), entry.getValue(), bands, actor);
+                    entry.getKey(), assessment.getIntAssessmentId(), entry.getValue(), bands, request.assessedOn(), actor);
         }
 
         log.info("Uploaded {} score(s) for assessment {} by {}",

@@ -716,7 +716,7 @@ class PortalApiIntegrationTest {
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"examId":"1","batchId":9001,"rows":[
+                                    {"examId":"1","batchId":9001,"assessedOn":"2026-09-18","rows":[
                                       {"employeeId":"70001","score":33},
                                       {"employeeId":"70002","score":80}]}
                                     """))
@@ -735,7 +735,7 @@ class PortalApiIntegrationTest {
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"examId":"1","batchId":9001,"rows":[
+                                    {"examId":"1","batchId":9001,"assessedOn":"2026-09-18","rows":[
                                       {"employeeId":"70001","score":33},
                                       {"employeeId":"70002","score":500}]}
                                     """))
@@ -755,7 +755,7 @@ class PortalApiIntegrationTest {
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"examId":"1","batchId":9001,"rows":[
+                                    {"examId":"1","batchId":9001,"assessedOn":"2026-09-18","rows":[
                                       {"employeeId":"70003","score":50}]}
                                     """))
                     .andExpect(status().isBadRequest())
@@ -769,7 +769,7 @@ class PortalApiIntegrationTest {
                             .header("Authorization", bearer(facultyToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"examId":"1","batchId":9002,"rows":[
+                                    {"examId":"1","batchId":9002,"assessedOn":"2026-09-18","rows":[
                                       {"employeeId":"70003","score":50}]}
                                     """))
                     .andExpect(status().isForbidden());

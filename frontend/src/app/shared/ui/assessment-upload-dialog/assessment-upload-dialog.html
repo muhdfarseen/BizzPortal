@@ -43,16 +43,29 @@
             (filterChange)="onFilterChange($event)"
           />
 
-          <label class="field">
-            <span class="field-label">Assessment</span>
-            <app-select
-              [options]="examOptions()"
-              [value]="examId()"
-              placeholder="Select assessment"
-              ariaLabel="Assessment"
-              (valueChange)="onExamChange($event)"
-            />
-          </label>
+          <div class="field-row">
+            <label class="field">
+              <span class="field-label">Assessment</span>
+              <app-select
+                [options]="examOptions()"
+                [value]="examId()"
+                placeholder="Select assessment"
+                ariaLabel="Assessment"
+                (valueChange)="onExamChange($event)"
+              />
+            </label>
+
+            <label class="field">
+              <span class="field-label">Assessed On</span>
+              <input
+                type="date"
+                class="date-input"
+                [value]="assessedOn()"
+                (change)="onAssessedOnChange($event)"
+                required
+              />
+            </label>
+          </div>
 
           <div class="step-actions">
             <button

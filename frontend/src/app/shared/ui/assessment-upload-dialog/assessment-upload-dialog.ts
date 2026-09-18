@@ -89,6 +89,7 @@ export class AssessmentUploadDialogComponent {
 
   readonly step = signal<UploadStep>('setup');
   readonly examId = signal('');
+  readonly assessedOn = signal(new Date().toISOString().slice(0, 10));
   readonly fileName = signal('');
   readonly preview = signal<UploadPreview | null>(null);
   readonly imported = signal(0);
@@ -113,7 +114,7 @@ export class AssessmentUploadDialogComponent {
   });
 
   /** Whether the template and the file picker are available yet. */
-  readonly canUseGroup = computed(() => this.groupReady() && this.selectedExam() !== null);
+  readonly canUseGroup = computed(() => this.groupReady() && this.selectedExam() !== null && this.assessedOn() !== '');
 
   readonly rows = computed(() => this.preview()?.rows ?? []);
   readonly sheetError = computed(() => this.preview()?.sheetError ?? null);
@@ -130,6 +131,11 @@ export class AssessmentUploadDialogComponent {
 
   onExamChange(value: string | undefined): void {
     this.examId.set(value ?? '');
+  }
+
+  onAssessedOnChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.assessedOn.set(input.value);
   }
 
   /** Downloads the template for the selected group and assessment. */
@@ -201,7 +207,7 @@ export class AssessmentUploadDialogComponent {
     }
 
     this.readError.set(null);
-    this.uploads.commit(filter, exam.id, preview.rows).subscribe({
+    this.uploads.commit(filter, exam.id, this.assessedOn(), preview.rows).subscribe({
       next: (count) => {
         this.imported.set(count);
         this.step.set('done');

@@ -233,7 +233,7 @@ describe('AssessmentUploadService', () => {
     expect(preview.validRows).toBe(1);
 
     let saved = -1;
-    service.commit(FILTER, '1', preview.rows).subscribe((count) => (saved = count));
+    service.commit(FILTER, '1', '2026-09-18', preview.rows).subscribe((count) => (saved = count));
 
     const upload = http.expectOne(`${API_BASE}/assessments/uploads`);
     expect(upload.request.method).toBe('POST');
@@ -242,6 +242,7 @@ describe('AssessmentUploadService', () => {
       locationId: 'BLR',
       batchId: 103,
       lgId: 1004,
+      assessedOn: '2026-09-18',
       rows: [{ employeeId: trainee.employeeId, score: 70 }],
     });
     upload.flush({ saved: 1 });
@@ -253,7 +254,7 @@ describe('AssessmentUploadService', () => {
     const [trainee] = ROSTER;
 
     service
-      .commit(FILTER, '1', [
+      .commit(FILTER, '1', '2026-09-18', [
         {
           rowNumber: 2,
           employeeId: trainee.employeeId,
@@ -312,7 +313,7 @@ describe('AssessmentUploadService', () => {
     let status = 0;
     let message = '';
     service
-      .commit(FILTER, '1', [
+      .commit(FILTER, '1', '2026-09-18', [
         {
           rowNumber: 2,
           employeeId: ROSTER[0].employeeId,

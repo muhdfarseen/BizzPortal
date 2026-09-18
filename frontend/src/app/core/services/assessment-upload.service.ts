@@ -159,6 +159,7 @@ export class AssessmentUploadService {
   commit(
     filter: AssessmentFilter,
     examId: string,
+    assessedOn: string,
     rows: readonly UploadPreviewRow[],
   ): Observable<number> {
     const body = {
@@ -166,6 +167,7 @@ export class AssessmentUploadService {
       locationId: filter.locationId,
       batchId: numericOrNull(filter.batchId),
       lgId: numericOrNull(filter.lgId),
+      assessedOn,
       rows: rows
         .filter((row) => row.ok && row.cefr !== null)
         .map((row) => ({ employeeId: row.employeeId, score: Number(row.score) })),

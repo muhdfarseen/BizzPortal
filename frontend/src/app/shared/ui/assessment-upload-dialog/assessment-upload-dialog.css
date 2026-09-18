@@ -153,12 +153,19 @@
   display: none;
 }
 
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
 .field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   min-width: 0;
   max-width: 16rem;
+  flex: 1;
 }
 
 .field-label {
@@ -168,6 +175,25 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #64748b;
+}
+
+.date-input {
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-card);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.05);
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-foreground);
+  box-sizing: border-box;
+  height: 36px;
+}
+
+.date-input:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
 }
 
 .hint {

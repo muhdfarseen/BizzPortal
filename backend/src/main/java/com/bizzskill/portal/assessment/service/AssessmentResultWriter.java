@@ -48,6 +48,7 @@ public class AssessmentResultWriter {
             Long assessmentId,
             Integer score,
             List<AppCefrBand> bands,
+            java.time.LocalDate assessedOn,
             String actor) {
 
         Optional<AppAssessmentResult> existing =
@@ -74,13 +75,13 @@ public class AssessmentResultWriter {
             Integer previousScore = result.getIntScore();
             String previousLevel = result.getTxtCefrLevel();
 
-            result.recordScore(score, CefrMappingService.levelFor(score, bands), result.getTxtRemarks(), LocalDate.now());
+            result.recordScore(score, CefrMappingService.levelFor(score, bands), result.getTxtRemarks(), assessedOn != null ? assessedOn : LocalDate.now());
             audit.save(AppAssessmentResultAudit.ofUpdate(result, previousScore, previousLevel, actor));
             return;
         }
 
         AppAssessmentResult created = AppAssessmentResult.create(employeeId, assessmentId);
-        created.recordScore(score, CefrMappingService.levelFor(score, bands), null, LocalDate.now());
+        created.recordScore(score, CefrMappingService.levelFor(score, bands), null, assessedOn != null ? assessedOn : LocalDate.now());
         AppAssessmentResult saved = results.save(created);
         audit.save(AppAssessmentResultAudit.ofInsert(saved, actor));
     }

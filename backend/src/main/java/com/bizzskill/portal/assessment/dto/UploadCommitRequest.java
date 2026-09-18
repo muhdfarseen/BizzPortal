@@ -33,7 +33,10 @@ public record UploadCommitRequest(
         Long lgId,
 
         @NotEmpty(message = "The sheet has no rows to upload.")
-        List<UploadRow> rows) {
+        List<UploadRow> rows,
+
+        @NotNull(message = "Enter an assessment date.")
+        java.time.LocalDate assessedOn) {
 
     /**
      * One sheet row.

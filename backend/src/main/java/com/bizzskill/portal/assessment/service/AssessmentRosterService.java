@@ -230,7 +230,7 @@ public class AssessmentRosterService {
 
         String actor = caller.username();
         for (Map.Entry<Long, Integer> entry : pending.entrySet()) {
-            resultWriter.write(trainee.getIntEmployeeId(), entry.getKey(), entry.getValue(), bands, actor);
+            resultWriter.write(trainee.getIntEmployeeId(), entry.getKey(), entry.getValue(), bands, null, actor);
         }
     }
 
