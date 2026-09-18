@@ -210,7 +210,9 @@ balancer's rotation.
 |---|---|---|
 | `GET` | `/api/organization/locations` | `dashboard.view` |
 
-Returns Location → Batch → LG, already narrowed to the caller's scope.
+Returns Location → Batch → LG, already narrowed to the caller's scope. Each batch
+carries the `startDate` it began on — an ISO date (`2026-01-06`) or `null` where
+the portal holds none — which is what the client groups batches into quarters by.
 
 ### Dashboard
 
@@ -223,6 +225,12 @@ dashboard can never disagree with the assessment tables, and narrowed to the
 caller's scope for the same reason the roster is. `regular + remedial + lap`
 always equals the trainee count: a trainee is on at most one track, and the
 regular figure is derived rather than counted so that stays true by construction.
+
+Accepts the filter bar's `locationId`, `batchId` and `lgId`, plus the period it
+leads with — `year` and `quarter`, the quarter a batch must have begun in to count.
+The period is applied to the figures and not only to the choices above them: on
+Home, where "All" is a real selection, it is what makes "all batches" mean the
+quarter's batches rather than every batch the caller can see.
 
 ### Configuration
 

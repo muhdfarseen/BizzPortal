@@ -22,6 +22,12 @@ export interface LgGroup {
 export interface BatchGroup {
   id: string;
   name: string;
+  /**
+   * The day the batch began, as an ISO date (`2026-01-06`), or `null` when the
+   * portal has none on record. A batch's quarter is read from it — see
+   * {@link batchStartQuarter}.
+   */
+  startDate: string | null;
   lgs: LgGroup[];
 }
 
@@ -47,6 +53,7 @@ export interface ApiOrganizationTree {
   batches?: readonly {
     id: string;
     name: string;
+    startDate?: string | null;
     lgs?: readonly { id: string; name: string }[];
   }[];
 }
@@ -65,6 +72,7 @@ export function setLocations(tree: readonly ApiOrganizationTree[]): void {
     batches: (location.batches ?? []).map((batch) => ({
       id: String(batch.id),
       name: batch.name,
+      startDate: batch.startDate ?? null,
       lgs: (batch.lgs ?? []).map((lg) => ({ id: String(lg.id), name: lg.name })),
     })),
   }));
@@ -113,4 +121,87 @@ export function batchesForLocations(locationIds: readonly string[]): BatchGroup[
   return LOCATIONS.filter((location) => locationIds.includes(location.id)).flatMap(
     (location) => location.batches,
   );
+}
+
+/* ── The calendar period a batch belongs to ─────────────────── */
+
+/** A calendar quarter of a calendar year, e.g. Q1 2026. */
+export interface QuarterInYear {
+  year: number;
+  /** 1 = Jan–Mar, 2 = Apr–Jun, 3 = Jul–Sep, 4 = Oct–Dec. */
+  quarter: number;
+}
+
+/** The four quarters, in the order the filter offers them. */
+export const QUARTERS: readonly number[] = [1, 2, 3, 4];
+
+/**
+ * The quarter the calendar is in — the period every screen opens on.
+ *
+ * `now` is a parameter so a spec can name the day it means rather than depend on
+ * the one the suite happens to run on.
+ */
+export function currentQuarter(now: Date = new Date()): QuarterInYear {
+  return { year: now.getFullYear(), quarter: Math.floor(now.getMonth() / 3) + 1 };
+}
+
+/**
+ * The quarter a batch starts in, read from its ISO start date.
+ *
+ * `null` when the batch has no start date, or one that is not a date. A batch
+ * with no start date belongs to no quarter at all, so a period filter never
+ * offers it: the filter can only show what it can prove.
+ *
+ * The month is read out of the string rather than through `new Date(...)`, which
+ * parses a bare date as UTC midnight and so reports a January batch as December
+ * to anyone west of Greenwich.
+ */
+export function batchStartQuarter(startDate: string | null | undefined): QuarterInYear | null {
+  const match = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec((startDate ?? '').trim());
+  if (!match) {
+    return null;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) {
+    return null;
+  }
+  return { year, quarter: Math.floor((month - 1) / 3) + 1 };
+}
+
+/** Whether a batch starts in the given year and/or quarter; `null` means "any". */
+export function batchStartsIn(
+  batch: BatchGroup,
+  year: number | null,
+  quarter: number | null,
+): boolean {
+  if (year === null && quarter === null) {
+    return true;
+  }
+  const starts = batchStartQuarter(batch.startDate);
+  if (!starts) {
+    return false;
+  }
+  return (
+    (year === null || starts.year === year) &&
+    (quarter === null || starts.quarter === quarter)
+  );
+}
+
+/** The years any of these batches start in, oldest first. */
+export function batchStartYears(batches: readonly BatchGroup[]): number[] {
+  const years = new Set<number>();
+  for (const batch of batches) {
+    const starts = batchStartQuarter(batch.startDate);
+    if (starts) {
+      years.add(starts.year);
+    }
+  }
+  return [...years].sort((left, right) => left - right);
+}
+
+/** How a period reads in a sentence, e.g. `Q1 2026`, `Q1` or `2026`. */
+export function periodLabel(year: number | null, quarter: number | null): string {
+  const parts = [quarter === null ? null : `Q${quarter}`, year === null ? null : String(year)];
+  return parts.filter((part) => part !== null).join(' ');
 }

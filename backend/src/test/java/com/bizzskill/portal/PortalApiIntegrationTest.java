@@ -55,6 +55,9 @@ class PortalApiIntegrationTest {
      *
      * <p>The bootstrap admin comes from migration V3; the restricted faculty
      * account is created here because its assignments are what the tests are about.
+     *
+     * <p>The two batches begin in different quarters (Q1 and Q3 2026) so the
+     * dashboard's period filter has one batch to include and one to exclude.
      */
     @BeforeEach
     void setUp() throws Exception {
@@ -67,7 +70,7 @@ class PortalApiIntegrationTest {
                 insert into batch (intbatch_id, txtstatus, txtbatch_type, txtbatch_name,
                                    txtilp_location_id, datebatch_start_date, datebatch_end_date)
                 values (9001, 'A', 'ILP', 'Batch 01', 'KOC', '2026-01-06', '2026-06-30'),
-                       (9002, 'A', 'ILP', 'Batch 01', 'TRV', '2026-01-06', '2026-06-30')
+                       (9002, 'A', 'ILP', 'Batch 01', 'TRV', '2026-07-01', '2026-12-20')
                 on conflict do nothing
                 """);
         jdbc.update("""
@@ -479,7 +482,9 @@ class PortalApiIntegrationTest {
                     .andExpect(jsonPath("$.length()").value(1))
                     .andExpect(jsonPath("$[0].id").value("KOC"))
                     .andExpect(jsonPath("$[0].batches.length()").value(1))
-                    .andExpect(jsonPath("$[0].batches[0].id").value("9001"));
+                    .andExpect(jsonPath("$[0].batches[0].id").value("9001"))
+                    // The filter bar groups batches into quarters by this date.
+                    .andExpect(jsonPath("$[0].batches[0].startDate").value("2026-01-06"));
         }
 
         @Test
@@ -941,6 +946,65 @@ class PortalApiIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totals.trainees").value(2))
                     .andExpect(jsonPath("$.totals.batches").value(1));
+        }
+
+        @Test
+        @DisplayName("counts only the batches that began in the chosen quarter")
+        void narrowsToOneQuarter() throws Exception {
+            // No batch named, so "all" has to mean the period's batches: 9001 began in
+            // Q1 2026 and holds both Kochi trainees, 9002 in Q3 2026 and holds
+            // Trivandrum's. Without this the cards would count a batch the dropdown
+            // right above them did not offer.
+            mvc.perform(get("/api/dashboard/summary?year=2026&quarter=1")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totals.trainees").value(2))
+                    .andExpect(jsonPath("$.totals.batches").value(1))
+                    .andExpect(jsonPath("$.locations.length()").value(1))
+                    .andExpect(jsonPath("$.locations[0].locationId").value("KOC"));
+
+            mvc.perform(get("/api/dashboard/summary?year=2026&quarter=3")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totals.trainees").value(1))
+                    .andExpect(jsonPath("$.totals.batches").value(1))
+                    .andExpect(jsonPath("$.locations[0].locationId").value("TRV"));
+        }
+
+        @Test
+        @DisplayName("a quarter holding no batch reports nothing, not everything")
+        void emptyQuarterReportsNothing() throws Exception {
+            // The failure this guards against is the opposite answer: a period that is
+            // not applied looks exactly like a period with no data unless it is checked.
+            mvc.perform(get("/api/dashboard/summary?year=2026&quarter=2")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totals.trainees").value(0))
+                    .andExpect(jsonPath("$.totals.batches").value(0))
+                    .andExpect(jsonPath("$.locations.length()").value(0));
+        }
+
+        @Test
+        @DisplayName("the period and the chosen group are applied together")
+        void periodAndGroupAreIntersected() throws Exception {
+            // Q3 holds 9002, not 9001, so naming 9001 is a selection narrowed to
+            // nothing — not a reason to ignore the period.
+            mvc.perform(get("/api/dashboard/summary?batchId=9001&year=2026&quarter=3")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totals.trainees").value(0));
+        }
+
+        @Test
+        @DisplayName("the period cannot reach past the caller's scope")
+        void periodCannotWidenScope() throws Exception {
+            // Faculty hold batch 9001 only. A quarter asked about is a narrowing, never
+            // a widening: Trivandrum's Q3 batch stays out of their figures.
+            mvc.perform(get("/api/dashboard/summary?year=2026&quarter=3")
+                            .header("Authorization", bearer(facultyToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totals.trainees").value(0))
+                    .andExpect(jsonPath("$.locations.length()").value(0));
         }
     }
 

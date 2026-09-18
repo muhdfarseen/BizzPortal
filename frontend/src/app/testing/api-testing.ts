@@ -20,7 +20,13 @@ import { AuthService } from '../core/services/auth.service';
 /** Base URL the environment points at. */
 export const API_BASE = 'http://localhost:8080/api';
 
-/** The seeded organisation tree, as `GET /api/organization/locations` answers. */
+/**
+ * The seeded organisation tree, as `GET /api/organization/locations` answers.
+ *
+ * Reduced from the fourteen seeded locations to the five the specs need, and the
+ * start dates are spread over three quarters — the real seed piles every batch
+ * into Q1 2026, which would leave the period filter with nothing to narrow.
+ */
 export const ORG_TREE: readonly ApiOrganizationTree[] = [
   {
     id: 'BLR',
@@ -29,18 +35,31 @@ export const ORG_TREE: readonly ApiOrganizationTree[] = [
       {
         id: '103',
         name: 'Batch 01',
+        startDate: '2025-10-13',
         lgs: [
           { id: '1004', name: 'LG Alpha' },
           { id: '1005', name: 'LG Beta' },
         ],
       },
-      { id: '104', name: 'Batch 02', lgs: [{ id: '1006', name: 'LG Gamma' }] },
+      {
+        id: '104',
+        name: 'Batch 02',
+        startDate: '2026-07-06',
+        lgs: [{ id: '1006', name: 'LG Gamma' }],
+      },
     ],
   },
   {
     id: 'CHN',
     name: 'Chennai',
-    batches: [{ id: '105', name: 'Batch 01', lgs: [{ id: '1007', name: 'LG Alpha' }] }],
+    batches: [
+      {
+        id: '105',
+        name: 'Batch 01',
+        startDate: '2026-01-20',
+        lgs: [{ id: '1007', name: 'LG Alpha' }],
+      },
+    ],
   },
   {
     id: 'KOC',
@@ -49,18 +68,31 @@ export const ORG_TREE: readonly ApiOrganizationTree[] = [
       {
         id: '101',
         name: 'Batch 01',
+        startDate: '2026-01-06',
         lgs: [
           { id: '1001', name: 'LG Alpha' },
           { id: '1002', name: 'LG Beta' },
         ],
       },
+      {
+        id: '107',
+        name: 'Batch 02',
+        startDate: '2026-02-03',
+        lgs: [{ id: '1008', name: 'LG Delta' }],
+      },
     ],
   },
-  { id: 'PUN', name: 'Pune', batches: [{ id: '106', name: 'Batch 01', lgs: [] }] },
+  {
+    id: 'PUN',
+    name: 'Pune',
+    batches: [{ id: '106', name: 'Batch 01', startDate: '2025-12-01', lgs: [] }],
+  },
   {
     id: 'TRV',
     name: 'Trivandrum',
-    batches: [{ id: '102', name: 'Batch 01', lgs: [{ id: '1003', name: 'LG Alpha' }] }],
+    batches: [
+      { id: '102', name: 'Batch 01', startDate: '2026-01-06', lgs: [{ id: '1003', name: 'LG Alpha' }] },
+    ],
   },
 ];
 

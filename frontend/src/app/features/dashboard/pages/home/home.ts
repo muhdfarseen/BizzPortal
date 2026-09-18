@@ -94,10 +94,17 @@ export class HomeComponent implements AfterViewInit, OnDestroy {
     };
   });
 
-  constructor() {
-    this.reload();
-  }
-
+  /**
+   * Reports the selection the page is showing — including the bar's opening state,
+   * which it emits from its own `ngOnInit`, so this is also the page's first load.
+   *
+   * There is deliberately no load in the constructor. That fired a second, unscoped
+   * request — no batch and no quarter — and whichever of the two answered last
+   * painted the cards: a slow unscoped response would land on top of the quarter the
+   * bar was showing, which is how the page came to display the whole portal's figures
+   * under a Q3 2026 filter. The period the page opens on is the bar's business (it
+   * reads the calendar), so the page waits to be told rather than guessing.
+   */
   onFilterChange(state: FilterState): void {
     this.activeFilter.set(state);
     this.reload();
@@ -112,6 +119,11 @@ export class HomeComponent implements AfterViewInit, OnDestroy {
         locationId: filter?.locationId ?? null,
         batchId: filter?.batchId ?? null,
         lgId: filter?.lgId ?? null,
+        // The period is part of the request, not only of the dropdown: with no batch
+        // chosen, "All" means the quarter's batches, and the figures have to agree
+        // with the list the user just picked from.
+        year: filter?.year ?? null,
+        quarter: filter?.quarter ?? null,
       })
       .subscribe({
         next: () => this.updateChart(),

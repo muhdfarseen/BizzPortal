@@ -29,7 +29,7 @@ const EXAM_CONFIG = [
   },
 ];
 
-const FILTER = { locationId: 'BLR', batchId: '103', lgId: '1004' };
+const FILTER = { locationId: 'BLR', batchId: '103', lgId: '1004', year: 2026, quarter: 1 };
 
 const ROSTER: readonly ApiTraineeFixture[] = traineeRows(2);
 
@@ -150,7 +150,9 @@ describe('AssessmentUploadDialogComponent', () => {
   it('opens on the setup step with the group filters and the assessment picker', () => {
     const fixture = createFixture();
 
-    expect(host(fixture).querySelectorAll('.filter-bar app-select').length).toBe(3);
+    // Location, batch, LG, and the quarter/year that narrow the batches.
+    expect(host(fixture).querySelectorAll('.filter-bar app-select').length).toBe(5);
+    expect(host(fixture).querySelector('.filter-bar [aria-label="Quarter"]')).not.toBeNull();
     expect(host(fixture).querySelector('.exam-multi-select')).toBeNull();
     expect(host(fixture).textContent).toContain('Choose the group and the assessment');
   });
@@ -174,7 +176,13 @@ describe('AssessmentUploadDialogComponent', () => {
 
   it('needs a location, batch and LG, not just an assessment', () => {
     const fixture = createFixture();
-    dialog(fixture).onFilterChange({ locationId: 'BLR', batchId: null, lgId: null });
+    dialog(fixture).onFilterChange({
+      locationId: 'BLR',
+      batchId: null,
+      lgId: null,
+      year: 2026,
+      quarter: 1,
+    });
     dialog(fixture).onExamChange('1');
     fixture.detectChanges();
 

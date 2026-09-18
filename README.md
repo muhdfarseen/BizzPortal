@@ -80,7 +80,7 @@ created by `DemoDataLoader` and only exist under the `local` profile.
 
 ```bash
 cd backend  && mvn test                      # 90 tests
-cd frontend && npm test -- --watch=false     # 358 tests
+cd frontend && npm test -- --watch=false     # 375 tests
 ```
 
 The backend suite needs `bizzskill_portal_test` to exist and runs against real
@@ -200,7 +200,38 @@ ordering are all done by the database and sent one page at a time, so a group of
 two thousand trainees costs a client the same few kilobytes as a group of ten.
 Filters narrow the whole group rather than the page on screen, which is the
 difference that matters: a client-side filter over one page reports "no matches"
-for a trainee sitting on another.
+for a trainee sitting on another.Every screen shares one filter bar, and it opens with the period — the year and
+the quarter a batch began in — ahead of location, batch and LG. The period leads
+because it decides the rest, and it opens on the quarter in progress with no
+"every quarter" entry to fall back to: it is not a narrowing a screen can skip.
+Choose 2025 and Q4, then a location, and the batch dropdown drops to just the
+batches that began in that quarter at that location, with their LGs following from
+the batch. With no location chosen it lists every location's batches for the
+period, each named with its location — the batch names themselves repeat, so
+keeping one per name would have made the list whichever location came first. A
+batch's quarter is read from the start date the API sends with every batch, and the
+years are read from the whole tree rather than the chosen location, so the period
+can be set first and no choice quietly removes another from the menu. When a change leaves a
+quarter with no batch in it, the bar says so in a toast instead of writing the
+explanation into itself: a note inside the bar claimed a row of its own and pushed
+location, batch and LG onto the next line, so the header rearranged itself the
+moment a quarter came up empty. Nothing is announced on load — nothing has been
+chosen yet for the user to have expected otherwise.
+
+The period narrows the query as well as the choices. On the group-scoped screens it
+hardly matters, because a batch outside the period is never selectable there. Home
+offers "All" at each level, though, so the bar reports the quarter and year along
+with the location, batch and LG, and the dashboard counts only the batches that
+began in that quarter: "all batches" on Q1 2026 means Q1 2026's batches, not every
+batch in the portal. Reading it as every batch was the bug — the cards disagreed
+with the dropdown directly above them, which had already dropped the other
+quarters.
+
+Home loads on the bar's own report rather than loading twice: the bar emits the
+period it opens on as it initialises, and a page that also fired an unscoped
+request would be racing itself, with whichever answer arrived last painting the
+cards. The dashboard service additionally keeps only the newest answer, so a slow
+reply to a selection already moved away from cannot overwrite the one on screen.
 
 Destructive actions ask first. Assessments and CEFR levels are removed through
 one shared confirmation dialog (`shared/ui/confirm-dialog`), which is an
@@ -226,7 +257,7 @@ configuration, HTTP services for every screen, a bearer-token interceptor that
 ends the session on a 401, an error interceptor that unwraps the API's error
 envelope, route guards for authentication and permissions, and toast
 notifications for every action. No in-memory mock data remains in production
-code. 358 tests.
+code. 375 tests.
 
 Assigning a role's locations and batches is done from two dropdown pickers
 rather than a wall of checkboxes. Locations are a multi-select that keeps its

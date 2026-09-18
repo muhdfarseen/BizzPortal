@@ -31,12 +31,16 @@ public final class OrganizationTree {
     /**
      * A batch at a location.
      *
-     * @param id   the portal's {@code intbatch_id}, as a string.
-     * @param name the display name, e.g. {@code Batch 01}.
-     * @param lgs  the batch's learning groups; empty when the caller may see the
-     *             batch but none of its groups.
+     * @param id        the portal's {@code intbatch_id}, as a string.
+     * @param name      the display name, e.g. {@code Batch 01}.
+     * @param startDate the day the batch began, as an ISO date ({@code 2026-01-06}),
+     *                  or {@code null} when the portal has none on record. The
+     *                  filter bar reads a batch's quarter from it, and a batch with
+     *                  no start date belongs to no quarter.
+     * @param lgs       the batch's learning groups; empty when the caller may see the
+     *                  batch but none of its groups.
      */
-    public record BatchNode(String id, String name, List<LgNode> lgs) {
+    public record BatchNode(String id, String name, String startDate, List<LgNode> lgs) {
     }
 
     /**

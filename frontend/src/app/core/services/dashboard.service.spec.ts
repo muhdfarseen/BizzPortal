@@ -57,7 +57,9 @@ describe('DashboardService', () => {
   });
 
   it('sends only the filter parameters that are set', () => {
-    service.load({ locationId: 'KOC', batchId: null, lgId: undefined }).subscribe();
+    service
+      .load({ locationId: 'KOC', batchId: null, lgId: undefined, year: null, quarter: null })
+      .subscribe();
 
     const request = http.expectOne(
       (candidate) => candidate.url === `${API_BASE}/dashboard/summary`,
@@ -67,6 +69,24 @@ describe('DashboardService', () => {
     // string — an empty value would be read as a filter on an empty id.
     expect(request.request.params.has('batchId')).toBe(false);
     expect(request.request.params.has('lgId')).toBe(false);
+    // A period that is really absent must not arrive as "the year 0".
+    expect(request.request.params.has('year')).toBe(false);
+    expect(request.request.params.has('quarter')).toBe(false);
+
+    request.flush(SUMMARY);
+  });
+
+  it('sends the period, so an unscoped All is still one quarter', () => {
+    // The page's own bug report: the period narrowed the batch dropdown but not the
+    // figures, so "All batches" counted every batch in the portal. The server can
+    // only apply the period if it is told which one.
+    service.load({ year: 2026, quarter: 3 }).subscribe();
+
+    const request = http.expectOne(
+      (candidate) => candidate.url === `${API_BASE}/dashboard/summary`,
+    );
+    expect(request.request.params.get('year')).toBe('2026');
+    expect(request.request.params.get('quarter')).toBe('3');
 
     request.flush(SUMMARY);
   });
@@ -82,6 +102,41 @@ describe('DashboardService', () => {
     expect(request.request.params.get('lgId')).toBe('1001');
 
     request.flush(SUMMARY);
+  });
+
+  it('keeps the newest answer when an older request answers last', () => {
+    // Refresh issues one request; a second follows the moment the bar reports the
+    // quarter it opens on. They are two requests over one connection, so the order
+    // they come back in is not the order they left in — the slower, unscoped reply
+    // must not paint over the quarter the page is showing.
+    service.load().subscribe();
+    const unscoped = http.expectOne((candidate) => candidate.url === `${API_BASE}/dashboard/summary`);
+
+    const scoped: DashboardSummary = {
+      totals: { trainees: 2, batches: 1, regular: 2, remedial: 0, lap: 0 },
+      locations: [],
+    };
+    service.load({ year: 2026, quarter: 3 }).subscribe();
+    const quarter = http.expectOne((candidate) => candidate.url === `${API_BASE}/dashboard/summary`);
+
+    quarter.flush(scoped);
+    unscoped.flush(SUMMARY);
+
+    expect(service.summary()).toEqual(scoped);
+  });
+
+  it('does not call a good quarter a failure because a stale request failed', () => {
+    service.load().subscribe({ error: () => undefined });
+    const stale = http.expectOne((candidate) => candidate.url === `${API_BASE}/dashboard/summary`);
+
+    service.load({ year: 2026, quarter: 3 }).subscribe({ error: () => undefined });
+    const current = http.expectOne((candidate) => candidate.url === `${API_BASE}/dashboard/summary`);
+
+    current.flush(SUMMARY);
+    stale.error(new ProgressEvent('error'));
+
+    // Otherwise the page would show "could not be loaded" over figures that did load.
+    expect(service.failed()).toBe(false);
   });
 
   it('reports a failure instead of leaving zeroes that read as "no trainees"', () => {

@@ -13,6 +13,7 @@ import com.bizzskill.portal.security.PortalPrincipal;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -90,6 +91,7 @@ public class OrganizationService {
                                 .map(batch -> new BatchNode(
                                         String.valueOf(batch.getIntBatchId()),
                                         batch.getTxtBatchName(),
+                                        iso(batch.getDateBatchStartDate()),
                                         groupsByBatch.getOrDefault(batch.getIntBatchId(), List.of()).stream()
                                                 .map(group -> new LgNode(
                                                         String.valueOf(group.getIntLgId()),
@@ -120,5 +122,10 @@ public class OrganizationService {
 
     private boolean maySeeBatch(PortalPrincipal caller, Long batchId) {
         return !caller.isBatchRestricted() || caller.batchIds().contains(batchId);
+    }
+
+    /** Renders a date the way every response does — ISO ({@code 2026-01-06}), never a timestamp. */
+    private static String iso(LocalDate date) {
+        return date == null ? null : date.toString();
     }
 }

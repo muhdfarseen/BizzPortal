@@ -1,4 +1,33 @@
 <div class="filter-bar">
+  <!--
+    The period leads, year then quarter: choosing both is what decides which
+    batches — and so which LGs — the rest of the bar has to offer.
+  -->
+
+  <!-- Year -->
+  <div class="filter-group">
+    <span class="filter-label">YEAR</span>
+    <app-select
+      [options]="yearOptions()"
+      [value]="selectedYear()"
+      placeholder="Year"
+      ariaLabel="Year"
+      (valueChange)="onYearChange($event)"
+    />
+  </div>
+
+  <!-- Quarter -->
+  <div class="filter-group">
+    <span class="filter-label">QUARTER</span>
+    <app-select
+      [options]="quarterOptions"
+      [value]="selectedQuarter()"
+      placeholder="Quarter"
+      ariaLabel="Quarter"
+      (valueChange)="onQuarterChange($event)"
+    />
+  </div>
+
   <!-- Location -->
   <div class="filter-group">
     <span class="filter-label">LOCATION</span>

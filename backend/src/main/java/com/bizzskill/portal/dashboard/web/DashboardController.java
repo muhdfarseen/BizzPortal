@@ -28,15 +28,20 @@ public class DashboardController {
      * Headline counters and the per-location breakdown.
      *
      * <p>Accepts the same filter as the assessment table so the dashboard can be
-     * narrowed to the group being looked at. The response is additionally narrowed
-     * to the caller's own scope, so the numbers never count groups they cannot open.
+     * narrowed to the group being looked at, plus the period the filter bar leads
+     * with: a batch only counts once it began in the requested year and quarter, so
+     * "All batches" means the selected period's batches rather than the whole portal.
+     * The response is additionally narrowed to the caller's own scope, so the numbers
+     * never count groups they cannot open.
      */
     @GetMapping("/summary")
     @PreAuthorize("hasAuthority('dashboard.view')")
     public DashboardSummaryResponse summary(
             @RequestParam(required = false) String locationId,
             @RequestParam(required = false) Long batchId,
-            @RequestParam(required = false) Long lgId) {
-        return dashboard.summary(currentUser.require(), locationId, batchId, lgId);
+            @RequestParam(required = false) Long lgId,
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) Integer quarter) {
+        return dashboard.summary(currentUser.require(), locationId, batchId, lgId, year, quarter);
     }
 }

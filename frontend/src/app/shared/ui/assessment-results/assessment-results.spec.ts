@@ -91,13 +91,15 @@ describe('AssessmentResultsComponent', () => {
     ) as HTMLButtonElement;
   }
 
-  /** Picks the option with the given label from the nth filter dropdown. */
+  /** Picks the option with the given label from the filter dropdown so labelled. */
   async function chooseFilter(
     fixture: ReturnType<typeof createFixture>,
-    index: number,
+    filter: string,
     label: string,
   ): Promise<void> {
-    host(fixture).querySelectorAll<HTMLElement>('app-select')[index].click();
+    // Found by label, never by position: the bar is laid out to suit the screen,
+    // so an index would break every time a filter is moved or added.
+    host(fixture).querySelector<HTMLElement>(`app-select[aria-label="${filter}"]`)?.click();
     await flushOverlay();
     fixture.detectChanges();
 
@@ -118,11 +120,17 @@ describe('AssessmentResultsComponent', () => {
     );
   }
 
-  /** Selects Bangalore / Batch 01 / LG Alpha, searches and approves the first page. */
+  /**
+   * Selects Q4 2025, Bangalore / Batch 01 / LG Alpha, searches and approves the
+   * first page. The period is named because the bar opens on the quarter in
+   * progress, which holds none of the fixture's batches.
+   */
   async function searchBangalore(fixture: ReturnType<typeof createFixture>): Promise<void> {
-    await chooseFilter(fixture, 0, 'Bangalore');
-    await chooseFilter(fixture, 1, 'Batch 01');
-    await chooseFilter(fixture, 2, 'LG Alpha');
+    await chooseFilter(fixture, 'Year', '2025');
+    await chooseFilter(fixture, 'Quarter', 'Q4');
+    await chooseFilter(fixture, 'Location', 'Bangalore');
+    await chooseFilter(fixture, 'Batch', 'Batch 01');
+    await chooseFilter(fixture, 'LG', 'LG Alpha');
     searchButton(fixture).click();
     fixture.detectChanges();
     flushTraineesPage(fixture, '1004', FIRST_PAGE);
@@ -181,18 +189,20 @@ describe('AssessmentResultsComponent', () => {
     expect(host(fixture).querySelector('.filter-search-icon')).not.toBeNull();
     expect(searchButton(fixture).disabled).toBe(true);
 
-    await chooseFilter(fixture, 0, 'Bangalore');
-    await chooseFilter(fixture, 1, 'Batch 01');
+    await chooseFilter(fixture, 'Year', '2025');
+    await chooseFilter(fixture, 'Quarter', 'Q4');
+    await chooseFilter(fixture, 'Location', 'Bangalore');
+    await chooseFilter(fixture, 'Batch', 'Batch 01');
     expect(searchButton(fixture).disabled).toBe(true);
 
-    await chooseFilter(fixture, 2, 'LG Alpha');
+    await chooseFilter(fixture, 'LG', 'LG Alpha');
     expect(searchButton(fixture).disabled).toBe(false);
   });
 
   it('does not search while the selection is incomplete', async () => {
     const fixture = createFixture();
 
-    await chooseFilter(fixture, 0, 'Bangalore');
+    await chooseFilter(fixture, 'Location', 'Bangalore');
     searchButton(fixture).click();
     fixture.detectChanges();
 
@@ -302,7 +312,7 @@ describe('AssessmentResultsComponent', () => {
     fixture.detectChanges();
     expect(summary(fixture)).toContain('Showing 26–30');
 
-    await chooseFilter(fixture, 2, 'LG Beta');
+    await chooseFilter(fixture, 'LG', 'LG Beta');
     searchButton(fixture).click();
     fixture.detectChanges();
     flushTraineesPage(fixture, '1005', FIRST_PAGE);
@@ -316,7 +326,7 @@ describe('AssessmentResultsComponent', () => {
 
     expect(host(fixture).querySelector('.results-notice')).toBeNull();
 
-    await chooseFilter(fixture, 2, 'LG Beta');
+    await chooseFilter(fixture, 'LG', 'LG Beta');
 
     expect(host(fixture).querySelector('.results-notice')?.textContent).toContain(
       'Filters changed',
