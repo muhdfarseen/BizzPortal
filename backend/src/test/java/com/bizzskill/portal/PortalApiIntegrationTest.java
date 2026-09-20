@@ -1008,6 +1008,333 @@ class PortalApiIntegrationTest {
         }
     }
 
+    @Nested
+    @DisplayName("reports")
+    class Reports {
+
+        @Test
+        @DisplayName("a trainee report carries the record and both timelines")
+        void traineeReportCarriesTheRecord() throws Exception {
+            mvc.perform(get("/api/reports/trainees/70001").header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.name").value("Aarav Nair"))
+                    .andExpect(jsonPath("$.batchName").value("Batch 01"))
+                    .andExpect(jsonPath("$.lgName").value("LG Alpha"))
+                    .andExpect(jsonPath("$.locationId").value("KOC"))
+                    .andExpect(jsonPath("$.locationName").value("Kochi"))
+                    // Every configured exam is on the timeline, so what is still to be
+                    // sat is visible rather than simply missing.
+                    .andExpect(jsonPath("$.exams.length()").value(3))
+                    .andExpect(jsonPath("$.exams[0].score").doesNotExist())
+                    .andExpect(jsonPath("$.currentTrack").doesNotExist())
+                    .andExpect(jsonPath("$.tracks.length()").value(0));
+        }
+
+        @Test
+        @DisplayName("a scored exam joins the timeline with the level the mapping awards")
+        void scoredExamJoinsTheTimeline() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70001")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"results\":{\"1\":{\"score\":62}}}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/reports/trainees/70001").header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    // 62 sits in the 60–67 band, so the report must read B2 — the same
+                    // level the assessment table would show for the same score.
+                    .andExpect(jsonPath("$.exams[0].assessmentName").value("Pre Assessment"))
+                    .andExpect(jsonPath("$.exams[0].score").value(62))
+                    .andExpect(jsonPath("$.exams[0].cefr").value("B2"))
+                    .andExpect(jsonPath("$.exams[0].assessedOn").isNotEmpty());
+        }
+
+        @Test
+        @DisplayName("an open placement is the current track and the first timeline entry")
+        void openPlacementIsTheCurrentTrack() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70002/lap-remedial")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"remedial\",\"remark\":\"Below threshold.\"}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/reports/trainees/70002").header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.currentTrack").value("remedial"))
+                    .andExpect(jsonPath("$.currentTrackSince").isNotEmpty())
+                    .andExpect(jsonPath("$.tracks.length()").value(1))
+                    .andExpect(jsonPath("$.tracks[0].status").value("open"))
+                    .andExpect(jsonPath("$.tracks[0].remark").value("Below threshold."))
+                    .andExpect(jsonPath("$.tracks[0].closeDate").doesNotExist());
+        }
+
+        @Test
+        @DisplayName("a closed placement stays on the timeline instead of disappearing")
+        void closedPlacementStaysOnTheTimeline() throws Exception {
+            // The whole point of the timeline: a trainee who was on Remedial and was
+            // then cleared has that history, not a blank report.
+            mvc.perform(patch("/api/assessments/trainees/70002/lap-remedial")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"remedial\",\"remark\":\"Needs support.\"}"))
+                    .andExpect(status().isNoContent());
+            mvc.perform(patch("/api/assessments/trainees/70002/lap-remedial")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"none\",\"remark\":\"Completed.\"}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/reports/trainees/70002").header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.currentTrack").doesNotExist())
+                    .andExpect(jsonPath("$.tracks.length()").value(1))
+                    .andExpect(jsonPath("$.tracks[0].track").value("remedial"))
+                    .andExpect(jsonPath("$.tracks[0].status").value("closed"))
+                    .andExpect(jsonPath("$.tracks[0].remark").value("Completed."))
+                    .andExpect(jsonPath("$.tracks[0].closeDate").isNotEmpty());
+        }
+
+        @Test
+        @DisplayName("another group's trainee is refused, not reported")
+        void traineeOutsideScopeIsRefused() throws Exception {
+            // 70003 is Trivandrum's; faculty hold Kochi's batch 9001 only. A report is
+            // not a way around the scope the roster enforces.
+            mvc.perform(get("/api/reports/trainees/70003").header("Authorization", bearer(facultyToken)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("the trainee search offers only who the caller may open")
+        void traineeSearchIsScoped() throws Exception {
+            mvc.perform(get("/api/reports/trainees?search=Rahul")
+                            .header("Authorization", bearer(facultyToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(0));
+
+            mvc.perform(get("/api/reports/trainees?search=meera")
+                            .header("Authorization", bearer(facultyToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(1))
+                    .andExpect(jsonPath("$[0].employeeId").value("70002"))
+                    .andExpect(jsonPath("$[0].name").value("Meera Iyer"))
+                    // The batch is carried so two trainees with one name can be told
+                    // apart before either report is opened.
+                    .andExpect(jsonPath("$[0].batchName").value("Batch 01"));
+        }
+
+        @Test
+        @DisplayName("a location report counts the batches, the tracks and the assessments run")
+        void locationReportCountsEverything() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70002/lap-remedial")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"lap\",\"remark\":\"No improvement.\"}"))
+                    .andExpect(status().isNoContent());
+            mvc.perform(patch("/api/assessments/trainees/70001")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"results\":{\"1\":{\"score\":62}}}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/reports/location?locationId=KOC")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.locationName").value("Kochi"))
+                    .andExpect(jsonPath("$.totals.trainees").value(2))
+                    .andExpect(jsonPath("$.totals.batches").value(1))
+                    .andExpect(jsonPath("$.totals.regular").value(1))
+                    .andExpect(jsonPath("$.totals.lap").value(1))
+                    .andExpect(jsonPath("$.batches.length()").value(1))
+                    .andExpect(jsonPath("$.batches[0].batchName").value("Batch 01"))
+                    .andExpect(jsonPath("$.batches[0].trainees").value(2))
+                    .andExpect(jsonPath("$.batches[0].lap").value(1))
+                    // Which assessments were conducted, and when: read from the results
+                    // themselves rather than from a timetable kept beside them.
+                    .andExpect(jsonPath("$.conducted.length()").value(1))
+                    // The row names the batch it belongs to: two batches sit the same
+                    // exam on the same day, and a date alone cannot say whose marks the
+                    // count covers.
+                    .andExpect(jsonPath("$.conducted[0].batchName").value("Batch 01"))
+                    .andExpect(jsonPath("$.conducted[0].assessmentName").value("Pre Assessment"))
+                    .andExpect(jsonPath("$.conducted[0].traineeCount").value(1))
+                    .andExpect(jsonPath("$.conducted[0].conductedOn").isNotEmpty());
+        }
+
+        @Test
+        @DisplayName("a batch carries the assessments it has sat")
+        void batchCarriesItsOwnAssessments() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70001")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"results\":{\"1\":{\"score\":62}}}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/reports/location?locationId=KOC")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.batches[0].conducted.length()").value(1))
+                    .andExpect(jsonPath("$.batches[0].conducted[0].assessmentName")
+                            .value("Pre Assessment"))
+                    .andExpect(jsonPath("$.batches[0].conducted[0].conductedOn").isNotEmpty())
+                    .andExpect(jsonPath("$.batches[0].conducted[0].traineeCount").value(1));
+        }
+
+        @Test
+        @DisplayName("one exam sat by two batches reads as two rows, each naming its batch")
+        void locationSittingsNameTheirBatch() throws Exception {
+            // A second Kochi batch, so the location has two batches sitting the same
+            // exam on the same day — the case a date alone cannot describe.
+            jdbc.update("""
+                    insert into batch (intbatch_id, txtstatus, txtbatch_type, txtbatch_name,
+                                       txtilp_location_id, datebatch_start_date, datebatch_end_date)
+                    values (9003, 'A', 'ILP', 'Batch 02', 'KOC', '2026-02-03', '2026-07-31')
+                    on conflict do nothing
+                    """);
+            jdbc.update("""
+                    insert into participant (intparticipant_id, intemployee_id, txtparticipant_name,
+                                             intbatch_id, intlg_id, txtreference_id, intstatus_id, txtphase_id)
+                    values (6004, 70004, 'Nisha Menon', 9003, null, 'KOC-3', 1, 'P1')
+                    on conflict do nothing
+                    """);
+
+            mvc.perform(patch("/api/assessments/trainees/70001")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"results\":{\"1\":{\"score\":62}}}"))
+                    .andExpect(status().isNoContent());
+            mvc.perform(patch("/api/assessments/trainees/70004")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"results\":{\"1\":{\"score\":44}}}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/reports/location?locationId=KOC")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.batches.length()").value(2))
+                    // Each batch lists its own sitting…
+                    .andExpect(jsonPath("$.batches[0].conducted.length()").value(1))
+                    .andExpect(jsonPath("$.batches[0].conducted[0].traineeCount").value(1))
+                    .andExpect(jsonPath("$.batches[1].conducted.length()").value(1))
+                    // …and the location carries both, told apart by batch rather than
+                    // merged into one row that could not say whose marks it counted.
+                    .andExpect(jsonPath("$.conducted.length()").value(2))
+                    .andExpect(jsonPath("$.conducted[0].batchName").value("Batch 01"))
+                    .andExpect(jsonPath("$.conducted[1].batchName").value("Batch 02"))
+                    .andExpect(jsonPath("$.conducted[0].traineeCount").value(1));
+        }
+
+        @Test
+        @DisplayName("a location report counts only the batches that began in the period")
+        void locationReportHonoursThePeriod() throws Exception {
+            // Kochi's batch began in Q1 2026. Asking about Q3 is a narrowing, not a
+            // reason to count every batch the location has ever had.
+            mvc.perform(get("/api/reports/location?locationId=KOC&year=2026&quarter=3")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totals.trainees").value(0))
+                    .andExpect(jsonPath("$.batches.length()").value(0))
+                    .andExpect(jsonPath("$.conducted.length()").value(0));
+
+            mvc.perform(get("/api/reports/location?locationId=KOC&year=2026&quarter=1")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totals.trainees").value(2))
+                    .andExpect(jsonPath("$.batches.length()").value(1));
+        }
+
+        @Test
+        @DisplayName("a batch outside the period takes its trainees and its marks with it")
+        void periodNarrowsTheConductedAssessments() throws Exception {
+            // The score belongs to a Q1 batch, so it is not part of the Q3 report even
+            // though it was recorded today.
+            mvc.perform(patch("/api/assessments/trainees/70001")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"results\":{\"1\":{\"score\":62}}}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/reports/location?locationId=KOC")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.conducted.length()").value(1));
+
+            mvc.perform(get("/api/reports/location?locationId=KOC&year=2026&quarter=3")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.conducted.length()").value(0));
+        }
+
+        @Test
+        @DisplayName("a released trainee counts as cleared, not as regular")
+        void releasedTraineeCountsAsCleared() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"remedial\",\"remark\":\"Needs support.\"}"))
+                    .andExpect(status().isNoContent());
+            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"none\",\"remark\":\"Completed.\"}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(get("/api/reports/location?locationId=KOC")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totals.cleared").value(1))
+                    .andExpect(jsonPath("$.totals.remedial").value(0))
+                    // The other Kochi trainee has never been placed, so they are the
+                    // only regular one: being released is not the same as never needing it.
+                    .andExpect(jsonPath("$.totals.regular").value(1));
+        }
+
+        @Test
+        @DisplayName("the location counters add up to the trainee count")
+        void locationCountersAreExhaustive() throws Exception {
+            String body = mvc.perform(get("/api/reports/location?locationId=KOC")
+                            .header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+
+            int trainees = JsonPath.read(body, "$.totals.trainees");
+            int regular = JsonPath.read(body, "$.totals.regular");
+            int remedial = JsonPath.read(body, "$.totals.remedial");
+            int lap = JsonPath.read(body, "$.totals.lap");
+            int cleared = JsonPath.read(body, "$.totals.cleared");
+
+            assertThat(regular + remedial + lap + cleared).isEqualTo(trainees);
+        }
+
+        @Test
+        @DisplayName("another location's report is refused, not emptied")
+        void locationOutsideScopeIsRefused() throws Exception {
+            // An empty report would be indistinguishable from a location that really
+            // holds nobody, which is exactly what hides a probe.
+            mvc.perform(get("/api/reports/location?locationId=TRV")
+                            .header("Authorization", bearer(facultyToken)))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("a location report without a location is refused")
+        void locationIsRequired() throws Exception {
+            mvc.perform(get("/api/reports/location").header("Authorization", bearer(adminToken)))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("reports need the reports permission")
+        void reportsNeedThePermission() throws Exception {
+            // Faculty are seeded with reports.view, so the check is that the endpoint
+            // is guarded at all: without a token it is refused outright.
+            mvc.perform(get("/api/reports/location?locationId=KOC"))
+                    .andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/reports/trainees/70001"))
+                    .andExpect(status().isUnauthorized());
+        }
+    }
+
     private static String bearer(String token) {
         return "Bearer " + token;
     }

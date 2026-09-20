@@ -1,0 +1,297 @@
+/* ============================================================
+   Trainee report — identity card and the two timelines
+   ============================================================ */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.report-card {
+  padding: 1.25rem 1.5rem;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.report-notice {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  background: #ffffff;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-xl);
+}
+
+.report-notice-text {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-muted-foreground);
+}
+
+/* ── Identity ──────────────────────────────────────────────── */
+
+.identity-header {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  flex-wrap: wrap;
+}
+
+.identity-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: var(--radius-full);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.identity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.identity-name {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+  line-height: 1.25;
+}
+
+.identity-meta {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-muted-foreground);
+}
+
+.track-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-left: auto;
+  padding: 0.3125rem 0.75rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.track-chip.is-remedial {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.track-chip.is-lap {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.track-chip-none {
+  background: #f1f5f9;
+  color: var(--color-muted-foreground);
+}
+
+.track-chip-since {
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.875rem 1.5rem;
+  margin: 1.25rem 0 0;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.fact-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+.fact-value {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-foreground);
+  overflow-wrap: anywhere;
+}
+
+/* ── Card headers ──────────────────────────────────────────── */
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.875rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.card-icon {
+  color: var(--color-primary);
+}
+
+.card-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.card-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-muted-foreground);
+}
+
+.card-empty {
+  margin: 1rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-muted-foreground);
+}
+
+/* ── Timeline ──────────────────────────────────────────────── */
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0 0;
+}
+
+.timeline-item {
+  position: relative;
+  display: flex;
+  gap: 0.875rem;
+  padding: 0.75rem 0 0.75rem 0;
+}
+
+/* The rail joining the dots; omitted on the last entry so the timeline ends. */
+.timeline-item:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 0.3125rem;
+  top: 1.5rem;
+  bottom: -0.25rem;
+  width: 1px;
+  background: var(--color-border);
+}
+
+.timeline-dot {
+  position: relative;
+  z-index: 1;
+  width: 0.6875rem;
+  height: 0.6875rem;
+  margin-top: 0.3125rem;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.timeline-item.is-pending .timeline-dot {
+  background: #ffffff;
+  border: 2px solid var(--color-border);
+}
+
+.timeline-item.is-open .timeline-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+
+.timeline-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.timeline-line {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.timeline-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.timeline-item.is-pending .timeline-title {
+  color: var(--color-muted-foreground);
+}
+
+.timeline-score {
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-foreground);
+}
+
+.cefr-badge {
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-full);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.status-chip {
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-full);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.status-chip.is-open {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.timeline-date {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-remark {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-foreground);
+}
+
+.timeline-source {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--color-muted-foreground);
+}

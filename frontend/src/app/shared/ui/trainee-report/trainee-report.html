@@ -1,0 +1,138 @@
+@if (failed()) {
+  <div class="report-notice" role="status">
+    <p class="report-notice-text">
+      This trainee's report could not be loaded. They may have moved out of your scope, or the
+      connection dropped.
+    </p>
+  </div>
+} @else if (loading()) {
+  <div class="report-notice" role="status">
+    <p class="report-notice-text">Loading report…</p>
+  </div>
+} @else if (report(); as trainee) {
+  <!-- Identity, and the facts the report is read for -->
+  <section class="report-card identity-card" aria-label="Trainee">
+    <div class="identity-header">
+      <div class="identity-avatar" aria-hidden="true">
+        <ng-icon name="reiconUser" size="22" />
+      </div>
+      <div class="identity-text">
+        <h3 class="identity-name">{{ trainee.name }}</h3>
+        <p class="identity-meta">Employee ID {{ trainee.employeeId }}</p>
+      </div>
+
+      @if (currentTrack(); as track) {
+        <span
+          class="track-chip"
+          [class.is-remedial]="track.css === 'remedial'"
+          [class.is-lap]="track.css === 'lap'"
+        >
+          On {{ track.label }}
+          @if (track.since) {
+            <span class="track-chip-since">since {{ track.since }}</span>
+          }
+        </span>
+      } @else {
+        <span class="track-chip track-chip-none">No LAP / Remedial track</span>
+      }
+    </div>
+
+    <dl class="fact-grid">
+      @for (fact of facts(); track fact.label) {
+        <div class="fact">
+          <dt class="fact-label">{{ fact.label }}</dt>
+          <dd class="fact-value">{{ fact.value }}</dd>
+        </div>
+      }
+    </dl>
+  </section>
+
+  <!-- Exam timeline -->
+  <section class="report-card" aria-label="Exam timeline">
+    <header class="card-header">
+      <div class="card-title-group">
+        <ng-icon name="reiconDocumentText" size="18" class="card-icon" aria-hidden="true" />
+        <h3 class="card-title">Exam timeline</h3>
+      </div>
+      <p class="card-hint">
+        @if (pendingExams() > 0) {
+          {{ pendingExams() }} still to be sat
+        } @else {
+          All exams sat
+        }
+      </p>
+    </header>
+
+    @if (trainee.exams.length === 0) {
+      <p class="card-empty">No exams are configured yet.</p>
+    } @else {
+      <ol class="timeline">
+        @for (exam of trainee.exams; track exam.assessmentId) {
+          <li class="timeline-item" [class.is-pending]="!exam.assessedOn">
+            <span class="timeline-dot" aria-hidden="true"></span>
+            <div class="timeline-body">
+              <div class="timeline-line">
+                <span class="timeline-title">{{ exam.assessmentName }}</span>
+                <span class="timeline-score">{{ examScore(exam) }}</span>
+                @if (cefrStyle(exam.cefr); as style) {
+                  <span
+                    class="cefr-badge"
+                    [style.background]="style.background"
+                    [style.color]="style.color"
+                  >
+                    {{ exam.cefr }}
+                  </span>
+                }
+              </div>
+              <p class="timeline-date">
+                {{ exam.assessedOn ? formatDate(exam.assessedOn) : 'Not yet sat' }}
+              </p>
+            </div>
+          </li>
+        }
+      </ol>
+    }
+  </section>
+
+  <!-- LAP / Remedial timeline -->
+  <section class="report-card" aria-label="LAP and Remedial timeline">
+    <header class="card-header">
+      <div class="card-title-group">
+        <ng-icon name="reiconClipboard" size="18" class="card-icon" aria-hidden="true" />
+        <h3 class="card-title">LAP / Remedial timeline</h3>
+      </div>
+      <p class="card-hint">
+        {{ trainee.tracks.length }} {{ trainee.tracks.length === 1 ? 'placement' : 'placements' }}
+      </p>
+    </header>
+
+    @if (!hasTrackHistory()) {
+      <p class="card-empty">This trainee has not been placed on a LAP or Remedial track.</p>
+    } @else {
+      <ol class="timeline">
+        @for (track of trainee.tracks; track $index) {
+          <li class="timeline-item" [class.is-open]="track.status === 'open'">
+            <span class="timeline-dot" aria-hidden="true"></span>
+            <div class="timeline-body">
+              <div class="timeline-line">
+                <span class="timeline-title">
+                  {{ track.track === 'lap' ? 'LAP' : 'Remedial' }}
+                </span>
+                <span class="status-chip" [class.is-open]="track.status === 'open'">
+                  {{ track.status === 'open' ? 'On track' : 'Closed' }}
+                </span>
+              </div>
+              <p class="timeline-date">{{ trackPeriod(track) }}</p>
+              @if (track.remark) {
+                <p class="timeline-remark">{{ track.remark }}</p>
+              }
+              @if (track.assessmentName) {
+                <p class="timeline-source">After {{ track.assessmentName }}</p>
+              }
+            </div>
+          </li>
+        }
+      </ol>
+    }
+  </section>
+}

@@ -68,6 +68,31 @@ public class Batch {
         // Required by JPA.
     }
 
+    /**
+     * Whether the batch began in the given year and quarter; a {@code null} half of
+     * the period means "any".
+     *
+     * <p>The rule lives here rather than in each service that reads a period, because
+     * the dashboard's figures, the filter bar's batch list and the location report
+     * all have to agree on which batches a quarter holds: a second copy of this would
+     * eventually answer differently, and the screen would count a batch its dropdown
+     * did not offer.
+     *
+     * <p>A batch with no start date on record began in no quarter at all, so it is in
+     * no period — a filter can only include what the data can prove. The month is read
+     * off the date directly rather than through a timezone.
+     */
+    public boolean startedIn(Integer year, Integer quarter) {
+        if (dateBatchStartDate == null) {
+            return false;
+        }
+
+        boolean yearMatches = year == null || dateBatchStartDate.getYear() == year;
+        boolean quarterMatches =
+                quarter == null || (dateBatchStartDate.getMonthValue() - 1) / 3 + 1 == quarter;
+        return yearMatches && quarterMatches;
+    }
+
     public Long getIntBatchId() {
         return intBatchId;
     }

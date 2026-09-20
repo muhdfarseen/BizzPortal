@@ -1,0 +1,101 @@
+<div class="page-shell">
+  <div class="page-header">
+    <div class="page-heading">
+      @if (activeReport()) {
+        <button type="button" class="back-button" (click)="closeReport()">
+          <ng-icon name="reiconArrowLeft" size="16" aria-hidden="true" />
+          <span>All reports</span>
+        </button>
+      }
+      <h2 class="page-title">Reports</h2>
+    </div>
+  </div>
+
+  @if (!activeReport()) {
+    <p class="page-intro">Choose a report to open.</p>
+
+    <div class="report-grid">
+      @for (card of cards; track card.id) {
+        <button type="button" class="report-card" (click)="openReport(card.id)">
+          <span class="report-card-icon" aria-hidden="true">
+            <ng-icon [name]="card.icon" size="22" />
+          </span>
+          <span class="report-card-title">{{ card.title }}</span>
+        </button>
+      }
+    </div>
+  } @else {
+    <section class="report-view" aria-label="Trainee report">
+      <div class="report-toolbar">
+        <div class="trainee-search">
+          <ng-icon
+            name="reiconSearchNormal2"
+            size="15"
+            class="trainee-search-icon"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            class="trainee-search-input"
+            [value]="draftQuery()"
+            placeholder="Search a trainee by name or employee ID"
+            aria-label="Search a trainee by name or employee ID"
+            (input)="onSearchInput($event)"
+            (focus)="isMatchMenuOpen.set(true)"
+          />
+          @if (hasSearchTerm()) {
+            <button
+              type="button"
+              class="trainee-search-clear"
+              aria-label="Clear search"
+              title="Clear search"
+              (click)="clearSearch()"
+            >
+              <ng-icon name="reiconCloseCircle" size="15" />
+            </button>
+          }
+
+          @if (isMatchMenuOpen() && (matches().length > 0 || noMatches())) {
+            <ul class="match-list" role="listbox" aria-label="Matching trainees">
+              @if (noMatches()) {
+                <li class="match-empty">No trainee matches that search.</li>
+              }
+              @for (match of matches(); track match.employeeId) {
+                <li>
+                  <button type="button" class="match-item" (click)="selectTrainee(match)">
+                    <span class="match-name">{{ match.name }}</span>
+                    <span class="match-meta">
+                      {{ match.employeeId }}
+                      @if (match.batchName) {
+                        · {{ match.batchName }}
+                      }
+                    </span>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        </div>
+      </div>
+
+      @if (selectedEmployeeId()) {
+        <app-trainee-report
+          [report]="traineeReport()"
+          [loading]="traineeLoading()"
+          [failed]="traineeFailed()"
+        />
+      } @else {
+        <div class="empty-state">
+          <div class="empty-state-icon" aria-hidden="true">
+            <ng-icon name="reiconSearchNormal2" size="36" />
+          </div>
+          <h3 class="empty-state-title">Search for a trainee</h3>
+          <p class="empty-state-text">
+            Type a name or employee ID above and pick the trainee to open their report — their
+            record, exam timeline and LAP / Remedial timeline.
+          </p>
+        </div>
+      }
+    </section>
+  }
+</div>

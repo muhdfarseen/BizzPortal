@@ -17,7 +17,6 @@ import com.bizzskill.portal.security.PortalPrincipal;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -93,7 +92,7 @@ public class DashboardService {
         if (year != null || quarter != null) {
             Map<Long, Batch> inPeriod = new LinkedHashMap<>();
             for (Batch batch : batchesById.values()) {
-                if (startsIn(batch, year, quarter)) {
+                if (batch.startedIn(year, quarter)) {
                     inPeriod.put(batch.getIntBatchId(), batch);
                 }
             }
@@ -124,28 +123,6 @@ public class DashboardService {
     /** No trainees are in the selection, so there is nothing to count. */
     private static DashboardSummaryResponse empty() {
         return new DashboardSummaryResponse(new Totals(0, 0, 0, 0, 0), List.of());
-    }
-
-    /**
-     * Whether a batch began in the given year and quarter; a {@code null} half of
-     * the period means "any".
-     *
-     * <p>A batch with no start date on record is in no quarter at all, so it is left
-     * out whenever a period is asked for — the same rule the filter bar applies to
-     * the batches it offers, so the dropdown and the figures cannot disagree. The year
-     * and quarter are read off the date directly rather than through a timezone.
-     */
-    private static boolean startsIn(Batch batch, Integer year, Integer quarter) {
-        if (batch == null || batch.getDateBatchStartDate() == null) {
-            return false;
-        }
-
-        LocalDate start = batch.getDateBatchStartDate();
-        boolean yearMatches = year == null || start.getYear() == year;
-        boolean quarterMatches =
-                quarter == null || (start.getMonthValue() - 1) / 3 + 1 == quarter;
-
-        return yearMatches && quarterMatches;
     }
 
     private Map<Long, Batch> loadBatches(List<Participant> trainees) {

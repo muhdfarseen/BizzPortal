@@ -37,6 +37,7 @@ export const routes: Routes = [
         path: 'reports',
         loadComponent: () =>
           import('./features/dashboard/pages/reports/reports').then((m) => m.ReportsComponent),
+        canActivate: [permissionGuard('reports.view')],
       },
       {
         path: 'user-management',
