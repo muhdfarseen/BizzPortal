@@ -27,12 +27,17 @@ export const routes: Routes = [
           ),
       },
       {
-        path: 'lap-remedial',
+        path: 'remedial',
         loadComponent: () =>
-          import('./features/dashboard/pages/lap-remedial/lap-remedial').then(
-            (m) => m.LapRemedialComponent,
-          ),
+          import('./features/dashboard/pages/remedial/remedial').then((m) => m.RemedialComponent),
       },
+      {
+        path: 'lap',
+        loadComponent: () =>
+          import('./features/dashboard/pages/lap/lap').then((m) => m.LapComponent),
+      },
+      // The tracks were one page before; the old address lands on Remedial.
+      { path: 'lap-remedial', redirectTo: 'remedial', pathMatch: 'full' },
       {
         path: 'reports',
         loadComponent: () =>

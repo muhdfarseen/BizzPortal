@@ -13,7 +13,7 @@ export interface LapRemedialChangeRequest {
   trainee: TraineeAssessment;
   /** The track the trainee will be on once confirmed. */
   status: LapRemedialStatus;
-  /** Heading and confirm-button text, e.g. `Move to Remedial`. */
+  /** Heading and confirm-button text, e.g. `Initiate Remedial`. */
   title: string;
 }
 
@@ -83,13 +83,25 @@ export class LapRemedialDialogComponent {
     const trainee = this.request().trainee;
     switch (this.request().status) {
       case 'remedial':
-        return `${trainee.name} will be moved to Remedial`;
+        return `${trainee.name} will be placed on Remedial`;
       case 'lap':
-        return `${trainee.name} will be moved to LAP`;
+        return `${trainee.name} will be placed on LAP`;
       default:
-        return `${trainee.name} will be marked as Cleared`;
+        return `${trainee.name} has completed the ${this.closedTrack()} cycle`;
     }
   });
+
+  /**
+   * The track a closing change ends, taken from the dialog's own title.
+   *
+   * Named from the title because that is what the person clicked: `Close LAP`
+   * and `Close Remedial` are the two ways a track ends, and the sentence should
+   * name the one they chose rather than the API's `none`.
+   */
+  private closedTrack(): string {
+    const track = this.request().title.replace(/^close\s+/i, '').trim();
+    return track === '' ? 'LAP / Remedial' : track.toLowerCase();
+  }
 
   onRemarkInput(event: Event): void {
     this.remark.set((event.target as HTMLTextAreaElement).value);

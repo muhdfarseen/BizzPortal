@@ -9,6 +9,7 @@ import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   reiconHome,
   reiconTask,
+  reiconBookOpen,
   reiconClipboard,
   reiconChart,
   reiconUsers,
@@ -50,6 +51,7 @@ interface NavItem {
     provideIcons({
       reiconHome,
       reiconTask,
+      reiconBookOpen,
       reiconClipboard,
       reiconChart,
       reiconUsers,
@@ -73,10 +75,16 @@ export class DashboardLayoutComponent {
       route: '/dashboard/assessments',
     },
     {
-      id: 'lap-remedial',
-      label: 'LAP / Remedial',
+      id: 'remedial',
+      label: 'Remedial',
+      icon: 'reiconBookOpen',
+      route: '/dashboard/remedial',
+    },
+    {
+      id: 'lap',
+      label: 'LAP',
       icon: 'reiconClipboard',
-      route: '/dashboard/lap-remedial',
+      route: '/dashboard/lap',
     },
     { id: 'reports', label: 'Reports', icon: 'reiconChart', route: '/dashboard/reports' },
     {

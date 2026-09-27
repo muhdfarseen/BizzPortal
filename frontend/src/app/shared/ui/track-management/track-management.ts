@@ -1,57 +1,56 @@
-import { Component, computed, inject, signal, viewChild } from '@angular/core';
-import { LapRemedialStatus, TraineeAssessment } from '../../../../core/models/assessment.model';
-import { DEFAULT_PAGE_SIZE, FIRST_PAGE, SortDirection } from '../../../../core/models/page.model';
-import { AssessmentService } from '../../../../core/services/assessment.service';
-import { AuthService } from '../../../../core/services/auth.service';
-import { ToastService } from '../../../../core/ui/toast.service';
-import { FilterBarComponent, FilterState } from '../../../../shared/filter-bar/filter-bar';
+import { Component, computed, inject, input, signal, viewChild } from '@angular/core';
+import { LapRemedialStatus, TraineeAssessment } from '../../../core/models/assessment.model';
+import { DEFAULT_PAGE_SIZE, FIRST_PAGE, SortDirection } from '../../../core/models/page.model';
+import { AssessmentService } from '../../../core/services/assessment.service';
+import { AuthService } from '../../../core/services/auth.service';
+import { ToastService } from '../../../core/ui/toast.service';
+import { FilterBarComponent, FilterState } from '../../filter-bar/filter-bar';
 import {
   AssessmentPageChange,
   AssessmentRowAction,
   AssessmentRowActionEvent,
   AssessmentSortChange,
   AssessmentTableComponent,
-} from '../../../../shared/ui/assessment-table/assessment-table';
+} from '../assessment-table/assessment-table';
 import {
   LapRemedialChange,
   LapRemedialChangeRequest,
   LapRemedialDialogComponent,
-} from '../../../../shared/ui/lap-remedial-dialog/lap-remedial-dialog';
+} from '../lap-remedial-dialog/lap-remedial-dialog';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { reiconSearchNormal2, reiconCloseCircle } from '@ng-icons/reicon';
 
-/** The track tabs of the page, in display order. */
-const TRACK_TABS: readonly { status: LapRemedialStatus; label: string }[] = [
-  { status: 'none', label: 'No LAP / Remedial' },
-  { status: 'remedial', label: 'Remedial' },
-  { status: 'lap', label: 'LAP' },
-];
-
-/** Row actions offered on every row of a tab, keyed by the tab's track. */
-const TAB_ACTIONS: Record<LapRemedialStatus, readonly AssessmentRowAction[]> = {
-  none: [{ id: 'move-to-remedial', label: 'Move to Remedial', variant: 'secondary' }],
-  remedial: [
-    { id: 'move-to-lap', label: 'Move to LAP', variant: 'secondary' },
-    { id: 'close-remedial', label: 'Close Remedial', variant: 'secondary' },
-  ],
-  lap: [{ id: 'close-lap', label: 'Close LAP', variant: 'secondary' }],
-  cleared: [],
-};
+/**
+ * One sub-tab of a track page: which trainees it lists and what may be done to
+ * them there.
+ *
+ * A page supplies its two tabs and nothing else — the query, the actions, the
+ * empty guidance and the columns all follow from the track the tab filters on,
+ * so the Remedial and LAP pages stay two thin configurations of one screen.
+ */
+export interface TrackTab {
+  /** Track the tab filters on, sent as the query's `status`. */
+  status: LapRemedialStatus;
+  /** Button text of the sub-tab. */
+  label: string;
+  /** Row actions offered on this tab, gated on `lap-remedial.manage`. */
+  actions: readonly AssessmentRowAction[];
+  /** Guidance shown when the tab holds no trainees. */
+  emptyHint: string;
+  /**
+   * Whether the tab's rows carry a start date and the remark they arrived with.
+   * A trainee being placed onto a track has neither yet, so the initiating tab
+   * leaves those columns off.
+   */
+  showsTrackColumns: boolean;
+}
 
 /** The track a row action moves a trainee onto. */
 const ACTION_TARGETS: Record<string, LapRemedialStatus> = {
-  'move-to-remedial': 'remedial',
-  'move-to-lap': 'lap',
+  'initiate-remedial': 'remedial',
+  'initiate-lap': 'lap',
   'close-remedial': 'cleared',
   'close-lap': 'cleared',
-};
-
-/** Guidance for a tab that holds no trainees. */
-const EMPTY_TAB_HINTS: Record<LapRemedialStatus, string> = {
-  none: 'No trainees without a LAP / Remedial track for this group.',
-  remedial: 'No trainees are on Remedial for this group.',
-  lap: 'No trainees are on LAP for this group.',
-  cleared: 'No trainees have cleared LAP / Remedial for this group.',
 };
 
 /**
@@ -65,32 +64,40 @@ const SORT_KEYS: Record<string, string> = {
 };
 
 /**
- * LAP / Remedial page: the filter bar, the track tabs and the trainees of the
- * tab on screen.
+ * LAP / Remedial track page: the filter bar, the sub-tabs and the trainees of
+ * the tab on screen.
  *
- * Trainees move along a track — none → remedial → lap — and every move is
- * confirmed in a dialog that records a remark. The remark given with a move is
- * what the destination tab's table shows, so each track knows why its trainees
- * arrived.
+ * One screen, configured rather than copied: a page names its title and its two
+ * tabs — the one that places trainees onto the track and the one that lists who
+ * is on it — and this renders both against the same server-paged query. Every
+ * change is confirmed in a dialog that records a remark, and the remark given
+ * with a move is what the destination tab's table shows, so each track knows why
+ * its trainees arrived.
  *
  * Each tab is its own server-paged query: the track is sent as the `status`
  * filter, so the pager counts the tab rather than the whole group and the page
  * on screen is never a slice of something larger.
  */
 @Component({
-  selector: 'app-lap-remedial',
+  selector: 'app-track-management',
   standalone: true,
   imports: [FilterBarComponent, AssessmentTableComponent, LapRemedialDialogComponent, NgIcon],
   providers: [provideIcons({ reiconSearchNormal2, reiconCloseCircle })],
-  templateUrl: './lap-remedial.html',
-  styleUrl: './lap-remedial.css',
+  templateUrl: './track-management.html',
+  styleUrl: './track-management.css',
 })
-export class LapRemedialComponent {
+export class TrackManagementComponent {
   private readonly assessments = inject(AssessmentService);
   private readonly auth = inject(AuthService);
   private readonly toasts = inject(ToastService);
 
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Heading of the page, e.g. `Remedial`. */
+  readonly title = input.required<string>();
+
+  /** The page's sub-tabs, in display order; the first opens with the page. */
+  readonly tabs = input.required<readonly TrackTab[]>();
 
   /** What the search box shows. */
   protected readonly draftQuery = signal('');
@@ -110,9 +117,6 @@ export class LapRemedialComponent {
     const selected = new Set(selectedIds);
     return this.exams().filter((exam) => selected.has(exam.id));
   });
-
-  /** The track tabs of the page, in display order. */
-  readonly trackTabs = TRACK_TABS;
 
   /** Filter of the results on screen; `null` until the first search. */
   readonly searchedFilter = signal<FilterState | null>(null);
@@ -142,13 +146,23 @@ export class LapRemedialComponent {
   private readonly sort = signal<string | undefined>(undefined);
   private readonly direction = signal<SortDirection | undefined>(undefined);
 
-  /** The track tab on screen. */
-  readonly activeTab = signal<LapRemedialStatus>('none');
+  /** The sub-tab on screen; unset until a selection, so the first tab opens. */
+  private readonly selectedTab = signal<LapRemedialStatus | undefined>(undefined);
 
   /** The track change awaiting its confirmation dialog, if any. */
   readonly confirming = signal<LapRemedialChangeRequest | null>(null);
 
   private readonly resultsTable = viewChild(AssessmentTableComponent);
+
+  /**
+   * The tab on screen. Read through the first tab rather than seeded in a field,
+   * so the page opens on its initiating tab however the inputs arrive.
+   */
+  readonly activeTab = computed<TrackTab | undefined>(() => {
+    const tabs = this.tabs();
+    const selected = this.selectedTab();
+    return tabs.find((tab) => tab.status === selected) ?? tabs[0];
+  });
 
   /** Whether a search has been run — drives the empty state. */
   readonly hasSearched = computed(() => this.searchedFilter() !== null);
@@ -176,18 +190,21 @@ export class LapRemedialComponent {
   });
 
   /**
-   * Row actions of the visible tab: moving a trainee along the track needs
+   * Row actions of the visible tab: moving a trainee along a track needs
    * `lap-remedial.manage`, so a role without it (Faculty) reads the tabs only.
    */
   readonly rowActions = computed<readonly AssessmentRowAction[]>(() =>
-    this.auth.has('lap-remedial.manage') ? TAB_ACTIONS[this.activeTab()] : [],
+    this.auth.has('lap-remedial.manage') ? (this.activeTab()?.actions ?? []) : [],
   );
 
   /** Whether the tab on screen shows the track columns: start date and remark. */
-  readonly showsTrackColumns = computed(() => this.activeTab() !== 'none');
+  readonly showsTrackColumns = computed(() => this.activeTab()?.showsTrackColumns === true);
 
   /** Guidance for the tab on screen when it holds no trainees. */
-  readonly emptyTabHint = computed(() => EMPTY_TAB_HINTS[this.activeTab()]);
+  readonly emptyTabHint = computed(() => this.activeTab()?.emptyHint ?? '');
+
+  /** Accessible name of the results region, e.g. `Remedial trainees`. */
+  readonly resultsLabel = computed(() => `${this.title()} trainees`);
 
   onFilterChange(state: FilterState): void {
     this.pendingFilter.set(state);
@@ -211,13 +228,17 @@ export class LapRemedialComponent {
 
   /** Reads one page of the tab on screen into {@link rows}. */
   private loadTrainees(filter: FilterState): void {
+    const tab = this.activeTab();
+    if (!tab) {
+      return;
+    }
     this.loading.set(true);
     this.assessments
       .getTrainees(filter, {
         page: this.pageIndex(),
         size: this.pageSize(),
         search: this.search(),
-        status: this.activeTab(),
+        status: tab.status,
         sort: this.sort(),
         direction: this.direction(),
       })
@@ -285,10 +306,10 @@ export class LapRemedialComponent {
   }
 
   selectTab(status: LapRemedialStatus): void {
-    if (status === this.activeTab()) {
+    if (status === this.activeTab()?.status) {
       return;
     }
-    this.activeTab.set(status);
+    this.selectedTab.set(status);
     // Tabs are counted separately by the server, so a page deep into one tab
     // may not exist in the next.
     this.pageIndex.set(FIRST_PAGE);
@@ -306,6 +327,10 @@ export class LapRemedialComponent {
     this.confirming.set({ trainee: event.trainee, status, title: event.action.label });
   }
 
+  closeDialog(): void {
+    this.confirming.set(null);
+  }
+
   /** Records the confirmed change and refreshes the tab's data. */
   onConfirm(change: LapRemedialChange): void {
     const filter = this.searchedFilter();
@@ -320,7 +345,7 @@ export class LapRemedialComponent {
         )
         .subscribe({
           next: () => {
-            this.toasts.success(LapRemedialComponent.outcomeFor(change.status));
+            this.toasts.success(TrackManagementComponent.outcomeFor(change.status));
             this.closeDialog();
             // The trainee has left the tab on screen, so its first page is read
             // again rather than patched: the row no longer belongs to it.
@@ -336,10 +361,6 @@ export class LapRemedialComponent {
     }
   }
 
-  closeDialog(): void {
-    this.confirming.set(null);
-  }
-
   /**
    * The confirmation for a move.
    *
@@ -349,9 +370,9 @@ export class LapRemedialComponent {
   private static outcomeFor(status: LapRemedialStatus): string {
     switch (status) {
       case 'remedial':
-        return 'Moved to Remedial';
+        return 'Remedial initiated';
       case 'lap':
-        return 'Moved to LAP';
+        return 'LAP initiated';
       case 'none':
         return 'Removed from LAP / Remedial';
       case 'cleared':

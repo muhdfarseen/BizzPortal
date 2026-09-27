@@ -193,7 +193,16 @@ the assessment workflow including score entry, LAP / Remedial tracking and the C
 bulk upload, with every score change written to an audit trail. 24 endpoints,
 90 tests.
 
-Both the assessment results and the LAP / Remedial tables carry a search box,
+Remedial and LAP are managed from their own tabs, each split into the two things an
+administrator does: **Initiate** lists the trainees a placement is made from and
+offers the move onto the track, while **Current** lists who is on the track and
+offers closing it. Initiate Remedial draws from trainees on no track; Initiate LAP
+draws from those on Remedial, which is how a LAP has always been entered. Every
+move is confirmed in a dialog that records a remark and a date, and the remark
+given at the move is what the destination table shows, so each track knows why its
+trainees arrived.
+
+Both the assessment results and the Remedial / LAP tables carry a search box,
 matching a partial name or employee id case-insensitively — typing either
 "aarav" or "41207" finds the same person. Paging, searching, filtering and
 ordering are all done by the database and sent one page at a time, so a group of

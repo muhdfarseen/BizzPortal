@@ -1,6 +1,8 @@
 /* ============================================================
-   LAP / Remedial — page shell (mirrors the assessment-results
-   section), the track tabs, and the results / empty states
+   LAP / Remedial track page — page shell, the two sub-tabs
+   (initiating and current), and the results / empty states.
+   Shared by the Remedial and LAP pages, which differ only in
+   the tabs they configure.
    ============================================================ */
 
 .page-shell {

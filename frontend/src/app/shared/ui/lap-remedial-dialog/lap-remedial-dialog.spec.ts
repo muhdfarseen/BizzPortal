@@ -16,7 +16,7 @@ const TRAINEE: TraineeAssessment = {
 const REQUEST: LapRemedialChangeRequest = {
   trainee: TRAINEE,
   status: 'remedial',
-  title: 'Move to Remedial',
+  title: 'Initiate Remedial',
 };
 
 @Component({
@@ -53,17 +53,17 @@ describe('LapRemedialDialogComponent', () => {
   it('renders the change, the trainee it applies to and what confirming does', () => {
     const element = host(createFixture());
 
-    expect(element.querySelector('.modal-title')?.textContent?.trim()).toBe('Move to Remedial');
+    expect(element.querySelector('.modal-title')?.textContent?.trim()).toBe('Initiate Remedial');
     expect(element.querySelector('.modal-subtitle')?.textContent).toContain('Aarav Nair');
     expect(element.querySelector('.modal-subtitle')?.textContent).toContain('EMP-41207');
-    expect(element.querySelector('.confirm-text')?.textContent).toContain('moved to Remedial');
+    expect(element.querySelector('.confirm-text')?.textContent).toContain('placed on Remedial');
   });
 
   it('words the change for every destination track', () => {
     const lap = createFixture();
-    lap.componentInstance.request.set({ ...REQUEST, status: 'lap', title: 'Move to LAP' });
+    lap.componentInstance.request.set({ ...REQUEST, status: 'lap', title: 'Initiate LAP' });
     lap.detectChanges();
-    expect(host(lap).querySelector('.confirm-text')?.textContent).toContain('moved to LAP');
+    expect(host(lap).querySelector('.confirm-text')?.textContent).toContain('placed on LAP');
 
     const close = createFixture();
     close.componentInstance.request.set({ ...REQUEST, status: 'none', title: 'Close LAP' });
@@ -83,7 +83,7 @@ describe('LapRemedialDialogComponent', () => {
       '.remark-input',
     ) as HTMLTextAreaElement;
 
-    expect(confirmButton.textContent?.trim()).toBe('Move to Remedial');
+    expect(confirmButton.textContent?.trim()).toBe('Initiate Remedial');
     expect(confirmButton.disabled).toBe(true);
 
     textarea.value = '   ';

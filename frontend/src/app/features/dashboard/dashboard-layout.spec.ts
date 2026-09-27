@@ -19,8 +19,8 @@ const ROUTES = [
   { path: '**', component: BlankPageComponent },
 ];
 
-/** The tabs every role may open — the four the administrative roles add to. */
-const SHARED_TABS = ['Home', 'Assessments', 'LAP / Remedial', 'Reports'];
+/** The tabs every role may open — the five the administrative roles add to. */
+const SHARED_TABS = ['Home', 'Assessments', 'Remedial', 'LAP', 'Reports'];
 
 describe('DashboardLayoutComponent', () => {
   let http: HttpTestingController;

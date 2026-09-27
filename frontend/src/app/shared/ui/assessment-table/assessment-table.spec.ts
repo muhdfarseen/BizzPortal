@@ -77,9 +77,9 @@ const EDIT_ACTION: AssessmentRowAction = {
   icon: 'reiconEdit2',
 };
 
-/** The text actions the LAP / Remedial page configures on its Remedial tab. */
+/** The text actions a track page configures on its current-track tab. */
 const TRACK_ACTIONS: readonly AssessmentRowAction[] = [
-  { id: 'move-to-lap', label: 'Move to LAP', variant: 'primary' },
+  { id: 'initiate-lap', label: 'Initiate LAP', variant: 'primary' },
   { id: 'close-lap', label: 'Close LAP', variant: 'secondary' },
 ];
 
@@ -685,7 +685,7 @@ describe('AssessmentTableComponent', () => {
     const firstRow = host(fixture).querySelector('tbody tr') as HTMLTableRowElement;
     const buttons = Array.from(firstRow.querySelectorAll<HTMLButtonElement>('.row-action-text'));
     expect(buttons.map((button) => button.textContent?.trim())).toEqual([
-      'Move to LAP',
+      'Initiate LAP',
       'Close LAP',
     ]);
     expect(buttons[0].getAttribute('data-variant')).toBe('primary');
@@ -694,7 +694,7 @@ describe('AssessmentTableComponent', () => {
     buttons[0].click();
     fixture.detectChanges();
 
-    expect(fixture.componentInstance.triggered[0].action.id).toBe('move-to-lap');
+    expect(fixture.componentInstance.triggered[0].action.id).toBe('initiate-lap');
     expect(fixture.componentInstance.triggered[0].trainee.employeeId).toBe('EMP-1001');
   });
 
