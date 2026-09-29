@@ -30,8 +30,11 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>The three endpoints are guarded by three different permissions, because they
  * are genuinely different capabilities: a Faculty member scores trainees they are
- * assigned, but moving someone onto a remedial track is a management decision held
- * by {@code lap-remedial.manage}.
+ * assigned, but moving someone onto a remedial track is a management decision.
+ *
+ * <p>The track endpoints are guarded on <em>view</em> and check the manage
+ * permission per track in the service, because LAP and Remedial are granted
+ * separately — a single authority on the endpoint could not tell them apart.
  */
 @RestController
 @RequestMapping("/api/assessments")
@@ -123,10 +126,17 @@ public class AssessmentsController {
         roster.saveResults(currentUser.require(), employeeId, request);
     }
 
-    /** Moves a trainee between the LAP / Remedial tracks, or closes their track. */
+    /**
+     * Moves a trainee between the LAP / Remedial tracks, or closes their track.
+     *
+     * <p>Guarded on {@code lap-remedial.view} rather than on a manage permission:
+     * the two tracks are granted separately, so which one may be moved depends on
+     * the track the request touches, not on the endpoint. {@code LapRemedialService}
+     * decides that, against the track the trainee is on.
+     */
     @PatchMapping("/trainees/{employeeId}/lap-remedial")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("hasAuthority('lap-remedial.manage')")
+    @PreAuthorize("hasAuthority('lap-remedial.view')")
     public void saveLapRemedial(
             @PathVariable Long employeeId, @Valid @RequestBody LapRemedialRequest request) {
         lapRemedial.save(currentUser.require(), employeeId, request);

@@ -141,7 +141,8 @@ erDiagram
     APP_ROLE ||--o{ APP_ROLE_PERMISSION : "introle_id"
     APP_PERMISSION ||--o{ APP_ROLE_PERMISSION : "intpermission_id"
     APP_USER ||--o{ APP_USER_LOCATION : "intuser_id"
-    APP_USER ||--o{ APP_USER_BATCH : "intuser_id"
+    APP_USER ||--o{ APP_USER_PERMISSION : "intuser_id"
+    APP_PERMISSION ||--o{ APP_USER_PERMISSION : "intpermission_id"
     APP_ASSESSMENT ||--o{ APP_ASSESSMENT_RESULT : "intassessment_id"
     APP_ASSESSMENT ||--o{ APP_LAP_REMEDIAL : "intassessment_id"
     APP_ASSESSMENT_RESULT ||--o{ APP_ASSESSMENT_RESULT_AUDIT : "intresult_id (logical)"
@@ -151,7 +152,7 @@ erDiagram
         varchar txtrole_code UK "varchar(45)"
         varchar txtrole_name "varchar(100)"
         varchar txtdescription "varchar(300), nullable"
-        varchar txtscope "varchar(30) - all | assigned-locations | assigned-batches"
+        varchar txtscope "varchar(30) - all | assigned-locations"
         int intsort_order
         varchar txtstatus "varchar(1) - A | I"
         timestamptz datecreated_on
@@ -194,9 +195,9 @@ erDiagram
         varchar txtlocation_id PK "varchar(4) -> LOCATION"
     }
 
-    APP_USER_BATCH {
+    APP_USER_PERMISSION {
         bigint intuser_id PK "FK -> APP_USER"
-        bigint intbatch_id PK "-> BATCH"
+        bigint intpermission_id PK "FK -> APP_PERMISSION"
     }
 
     APP_ASSESSMENT {
@@ -305,7 +306,6 @@ The honest summary, since the database does not enforce everything:
 | `intmin_score <= intmax_score` per CEFR band | Cross-field check | Application |
 | A score not exceeding the assessment's maximum | Service check | Application |
 | `app_user_location.txtlocation_id` → `location` | **Nothing** | Application (`UserService`) |
-| `app_user_batch.intbatch_id` → `batch` | **Nothing** | Application (`UserService`) |
 | `app_user.intemployee_id` → `participant` | **Nothing** | Application |
 | `app_assessment_result.intemployee_id` → `participant` | **Nothing** | Application (`TraineeScopeService`) |
 | `batch.txtilp_location_id` → `location` | **Nothing** | Application |
@@ -320,30 +320,49 @@ requires a lock on the referenced table. So the checks live in `UserService` and
 `TraineeScopeService` instead.
 
 **The practical consequence: if you ever write to these tables outside the
-application, nothing stops you creating an orphan.** Bulk-loading `app_user_batch`
-rows against batch ids that do not exist would succeed silently and produce users
-who can sign in but see nothing. The three places to be careful are
-`app_user_location`, `app_user_batch`, and any manual insert into
+application, nothing stops you creating an orphan.** A row in
+`app_user_location` naming a location that does not exist would succeed silently
+and produce users who can sign in but see nothing. The two places to be careful
+are `app_user_location`, and any manual insert into
 `app_assessment_result`.
 
 ### 1.6 Reference data as seeded
 
-**Four roles.**
+**Four roles.** `faculty` grants no track management; the two track permissions are
+granted per person (see `app_user_permission`).
+
+Scope is `all` or `assigned-locations` only. Batch-level access was removed by
+`V8__remove_batch_scope.sql`, which widened the faculty role, rebuilt the scope
+check constraint and dropped `app_user_batch`: a location assignment now grants
+every batch and learning group inside it.
 
 | Code | Name | Scope | Permissions |
 |---|---|---|---|
-| `superadmin` | Super Admin | `all` | 8 (everything) |
-| `program-manager` | Program Manager | `all` | 6 (no `users.manage`, no `configuration.manage`) |
-| `location-admin` | Location Admin | `assigned-locations` | 6 |
-| `faculty` | Faculty | `assigned-batches` | 5 (no `lap-remedial.manage`) |
+| `superadmin` | Super Admin | `all` | 9 (everything) |
+| `program-manager` | Program Manager | `all` | 7 (no `users.manage`, no `configuration.manage`) |
+| `location-admin` | Location Admin | `assigned-locations` | 7 |
+| `faculty` | Faculty | `assigned-locations` | 5 (view only) |
 
-**Eight permissions**, which are also the JWT authority strings —
+**Nine permissions**, which are also the JWT authority strings —
 `hasAuthority('assessments.edit')` is checking this table's
 `txtpermission_code` verbatim:
 
 `dashboard.view`, `assessments.view`, `assessments.edit`,
-`lap-remedial.view`, `lap-remedial.manage`, `reports.view`, `users.manage`,
-`configuration.manage`.
+`lap-remedial.view`, `lap-remedial.remedial-manage`, `lap-remedial.lap-manage`,
+`reports.view`, `users.manage`, `configuration.manage`.
+
+**`app_user_permission`** grants permissions to one account, over and above its
+role's. Only the two track codes are ever stored there: a role cannot express
+"this faculty member owns Remedial and the next owns both", so the choice is made
+per person in User Management. Grants are additive only — they add to the role
+and never subtract from it — and cascade when the account is deleted. The
+effective set is the union, computed in `AppUser.effectivePermissionCodes()` and
+used by both the token and the API.
+
+The single `lap-remedial.manage` these replaced could not express that split.
+`V7__split_lap_remedial_permissions.sql` did the split and copied every account
+already holding the coarse permission into the per-user table, so no one lost
+access when it ran.
 
 **Ten CEFR bands.** Note that 76 appears in two bands — that overlap is in the
 published Versant scale and is resolved at runtime by "highest minimum wins", with
@@ -663,8 +682,8 @@ classDiagram
 ### 2.4 Users, roles and organisation
 
 `UserService` is the only place that writes to `app_user`,
-`app_user_location` and `app_user_batch`, and the only place that enforces the
-assignment rules the database does not.
+`app_user_location` and `app_user_permission`, and the only place that enforces
+the assignment rules the database does not.
 
 ```mermaid
 classDiagram

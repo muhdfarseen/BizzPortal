@@ -1,6 +1,6 @@
 <div class="page-shell">
   <div class="page-header">
-    <h2 class="page-title">{{ title() }}</h2>
+    <h2 class="page-title">{{ heading() }}</h2>
     <app-filter-bar
       [requireFullSelection]="true"
       [exams]="exams()"
@@ -11,20 +11,16 @@
 
   @if (hasSearched()) {
     <div class="tabs-and-search">
-      <div class="track-tabs" role="tablist" [attr.aria-label]="title() + ' views'">
-        @for (tab of tabs(); track tab.status) {
-          <button
-            type="button"
-            role="tab"
-            class="track-tab"
-            [class.is-active]="activeTab()?.status === tab.status"
-            [attr.aria-selected]="activeTab()?.status === tab.status ? 'true' : 'false'"
-            (click)="selectTab(tab.status)"
-          >
-            {{ tab.label }}
-          </button>
-        }
-      </div>
+      @if (initiating()) {
+        <button type="button" class="initiate-btn is-secondary" (click)="cancelInitiate()">
+          <ng-icon name="reiconArrowLeft2" size="16" aria-hidden="true" />
+          <span>Back</span>
+        </button>
+      } @else if (canManage()) {
+        <button type="button" class="initiate-btn" (click)="startInitiate()">
+          {{ page().initiate.title }}
+        </button>
+      }
 
       <div class="lap-search">
         <ng-icon name="reiconSearchNormal2" size="15" class="lap-search-icon" aria-hidden="true" />
@@ -61,6 +57,7 @@
           [exams]="selectedExams()"
           [actions]="rowActions()"
           [showStartDate]="showsTrackColumns()"
+          [startDateHeader]="startDateHeader()"
           [showRemark]="showsTrackColumns()"
           [pageIndex]="pageIndex()"
           [pageSize]="pageSize()"
@@ -75,7 +72,7 @@
       </section>
     } @else {
       <div class="empty-state">
-        <p>{{ emptyTabHint() }}</p>
+        <p>{{ emptyHint() }}</p>
       </div>
     }
   } @else {

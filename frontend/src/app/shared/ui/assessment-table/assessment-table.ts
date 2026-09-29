@@ -79,6 +79,7 @@ function createColumns(
   exams: readonly AssessmentExam[],
   options: {
     showStartDate: boolean;
+    startDateHeader: string;
     showRemark: boolean;
     showActions: boolean;
     sortableColumns: readonly string[];
@@ -119,13 +120,17 @@ function createColumns(
   }));
 
   // The start date of a trainee's current track is shown only while a LAP /
-  // Remedial track tab is on screen, so the column comes and goes with the
-  // page's tabs.
+  // Remedial track is on screen, so the column comes and goes with the page.
+  // Its header names the track, because a trainee on Remedial and the same
+  // trainee a month later on LAP have two start dates and the column shows
+  // whichever the current view is listing.
   const startDateColumn: ColumnDef<AssessmentTableFeatures, TraineeAssessment>[] =
-    options.showStartDate ? [{ id: 'startDate', header: 'Start Date', enableSorting: false }] : [];
+    options.showStartDate
+      ? [{ id: 'startDate', header: options.startDateHeader, enableSorting: false }]
+      : [];
 
   // The remark a trainee arrived with is shown only while a LAP / Remedial
-  // track tab is on screen, so the column comes and goes with the page's tabs.
+  // track is on screen, so the column comes and goes with the page.
   const remarkColumn: ColumnDef<AssessmentTableFeatures, TraineeAssessment>[] = options.showRemark
     ? [{ id: 'remark', header: 'Remark', enableSorting: false }]
     : [];
@@ -230,6 +235,16 @@ export class AssessmentTableComponent {
   /** Whether rows show the start date of their current track (LAP / Remedial tracks). */
   readonly showStartDate = input(false);
 
+  /**
+   * Header of the start date column, naming the track the dates belong to —
+   * `LAP Start Date` on the LAP page, `Remedial Start Date` on the Remedial one.
+   *
+   * <p>Named by the host rather than derived here because the same column shows
+   * two different dates across a trainee's two tracks, and a bare "Start Date"
+   * leaves the reader guessing which one they are looking at.
+   */
+  readonly startDateHeader = input('Start Date');
+
   /** Whether rows show the remark they arrived with (LAP / Remedial tracks). */
   readonly showRemark = input(false);
 
@@ -300,6 +315,7 @@ export class AssessmentTableComponent {
   private readonly columns = computed(() =>
     createColumns(this.exams(), {
       showStartDate: this.showStartDate(),
+      startDateHeader: this.startDateHeader(),
       showRemark: this.showRemark(),
       showActions: this.actions().length > 0,
       sortableColumns: this.sortableColumns(),

@@ -27,10 +27,10 @@ import java.util.stream.Collectors;
  * Resolves which trainees a caller is allowed to see.
  *
  * <p>Every trainee-facing read and write goes through here, so the scoping rule
- * exists once. A Faculty member restricted to one batch must not be able to read
- * another batch's roster by editing a query string — and must not be able to score
- * a trainee outside it either, which is why writes call
- * {@link #requireVisible} rather than trusting the id in the URL.
+ * exists once. A user assigned to one location must not be able to read another
+ * location's roster by editing a query string — and must not be able to score a
+ * trainee outside it either, which is why writes call {@link #requireVisible}
+ * rather than trusting the id in the URL.
  *
  * <p>Asking for a group outside your scope is answered with 403 rather than an
  * empty list: an empty roster is indistinguishable from a batch that genuinely has
@@ -221,13 +221,14 @@ public class TraineeScopeService {
     /**
      * The batch ids a caller may see, or {@code null} when unrestricted.
      *
+     * <p>Derived from the assigned locations alone. There is no batch-level
+     * assignment any more: a location-scoped caller reaches every batch inside it,
+     * which is what stops the same person seeing a partial roster of a location.
+     *
      * <p>{@code null} rather than "every id" so an unrestricted role costs no extra
      * query, and so the distinction survives into the repository call.
      */
     public Set<Long> allowedBatchIds(PortalPrincipal caller) {
-        if (caller.isBatchRestricted()) {
-            return caller.batchIds();
-        }
         if (caller.isLocationRestricted()) {
             return batches.findByTxtIlpLocationIdInOrderByTxtBatchNameAsc(caller.locationIds()).stream()
                     .map(Batch::getIntBatchId)

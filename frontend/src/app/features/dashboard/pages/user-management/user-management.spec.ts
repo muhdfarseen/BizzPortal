@@ -47,11 +47,9 @@ const ROSTER: readonly ApiPortalUser[] = [
     email: 'gautham.iyer@tcs.com',
     role: 'faculty',
     roleName: 'Faculty',
-    scope: 'assigned-batches',
+    scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: true,
     locationIds: ['KOC'],
-    batchIds: [101],
     status: 'active',
   },
   {
@@ -60,11 +58,9 @@ const ROSTER: readonly ApiPortalUser[] = [
     email: 'ishita.sharma@tcs.com',
     role: 'faculty',
     roleName: 'Faculty',
-    scope: 'assigned-batches',
+    scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: true,
     locationIds: ['KOC'],
-    batchIds: [101],
     status: 'inactive',
   },
   {
@@ -73,11 +69,9 @@ const ROSTER: readonly ApiPortalUser[] = [
     email: 'vishnu.pillai@tcs.com',
     role: 'faculty',
     roleName: 'Faculty',
-    scope: 'assigned-batches',
+    scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: true,
     locationIds: ['BLR'],
-    batchIds: [103],
     status: 'active',
   },
   {
@@ -86,11 +80,9 @@ const ROSTER: readonly ApiPortalUser[] = [
     email: 'zoya.khan@tcs.com',
     role: 'faculty',
     roleName: 'Faculty',
-    scope: 'assigned-batches',
+    scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: true,
     locationIds: ['TRV'],
-    batchIds: [102],
     status: 'active',
   },
 ];
@@ -103,11 +95,9 @@ function extraUsers(count: number): ApiPortalUser[] {
     email: `extra.user.${index + 1}@tcs.com`,
     role: 'faculty',
     roleName: 'Faculty',
-    scope: 'assigned-batches',
+    scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: true,
     locationIds: ['BLR'],
-    batchIds: [103],
     status: 'active',
   }));
 }
@@ -581,19 +571,34 @@ describe('UserManagementComponent', () => {
       ) as HTMLButtonElement;
     }
 
+    it('offers a checkbox per track for Faculty, and neither is ticked to start', () => {
+      const fixture = createFixture();
+      openAddDialog(fixture);
+
+      // Both tracks are offered and the choice is the administrator's — this is
+      // what lets one faculty manage Remedial only and the next manage both.
+      const boxes = Array.from(
+        editDialog(fixture)?.querySelectorAll<HTMLInputElement>('.track-permission-input') ?? [],
+      );
+      expect(boxes.map((box) => box.dataset['permission'])).toEqual([
+        'lap-remedial.remedial-manage',
+        'lap-remedial.lap-manage',
+      ]);
+      expect(boxes.every((box) => !box.checked)).toBe(true);
+    });
+
     it('creates the account the dialog describes', async () => {
       const fixture = createFixture();
       openAddDialog(fixture);
 
       expect(editDialog(fixture)).not.toBeNull();
-      // A new account starts on the least access there is, which still needs
-      // a location and a batch before it can be saved.
+      // A new account starts on the least access there is, which still needs a
+      // location before it can be saved.
       expect(editDialog(fixture)?.textContent).toContain(roleLabel('faculty'));
       expect(saveButton(fixture).disabled).toBe(true);
 
       fillIdentity(fixture, '90002', 'Ananya Rao', 'ananya.rao@tcs.com');
       await tickFirst(fixture, 'Assigned locations');
-      await tickFirst(fixture, 'Assigned batches');
 
       expect(saveButton(fixture).disabled).toBe(false);
       saveButton(fixture).click();
@@ -606,8 +611,9 @@ describe('UserManagementComponent', () => {
         email: 'ananya.rao@tcs.com',
         role: 'faculty',
         locationIds: ['BLR'],
-        batchIds: ['103'],
         status: 'active',
+        // Neither track ticked yet, so the new account manages nothing.
+        trackPermissions: [],
       });
       request.flush({
         user: {
@@ -616,11 +622,9 @@ describe('UserManagementComponent', () => {
           email: 'ananya.rao@tcs.com',
           role: 'faculty',
           roleName: 'Faculty',
-          scope: 'assigned-batches',
+          scope: 'assigned-locations',
           requiresLocations: true,
-          requiresBatches: true,
           locationIds: ['BLR'],
-          batchIds: [103],
           status: 'active',
         },
         temporaryPassword: 'Temp-90002',
@@ -631,11 +635,9 @@ describe('UserManagementComponent', () => {
         email: 'ananya.rao@tcs.com',
         role: 'faculty',
         roleName: 'Faculty',
-        scope: 'assigned-batches',
+        scope: 'assigned-locations',
         requiresLocations: true,
-        requiresBatches: true,
         locationIds: ['BLR'],
-        batchIds: [103],
         status: 'active',
       });
       fixture.detectChanges();
@@ -659,7 +661,6 @@ describe('UserManagementComponent', () => {
       openAddDialog(fixture);
       fillIdentity(fixture, '90006', 'Ananya Rao', 'ananya.rao@tcs.com');
       await tickFirst(fixture, 'Assigned locations');
-      await tickFirst(fixture, 'Assigned batches');
 
       saveButton(fixture).click();
       fixture.detectChanges();
@@ -684,7 +685,6 @@ describe('UserManagementComponent', () => {
       openAddDialog(fixture);
       fillIdentity(fixture, '10294', 'Someone Else', 'someone.else@tcs.com');
       await tickFirst(fixture, 'Assigned locations');
-      await tickFirst(fixture, 'Assigned batches');
 
       // The duplicate may sit on another page, so the screen no longer guesses:
       // the server's 409 is what refuses it.

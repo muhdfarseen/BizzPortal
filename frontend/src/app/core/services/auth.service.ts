@@ -95,34 +95,19 @@ export class AuthService {
   /** Locations assigned to the session; empty for `all`-scope roles. */
   readonly assignedLocationIds = computed(() => this._user()?.locationIds ?? []);
 
-  /** Batches assigned to the session; empty unless the role is batch-scoped. */
-  readonly assignedBatchIds = computed(() => this._user()?.batchIds ?? []);
-
   /**
    * The organisation tree the session may search, narrowed to its scope: the
-   * assigned locations, and for batch-scoped roles only the assigned batches
-   * within them. Drives the options of the shared filter bar.
+   * assigned locations, and every batch and learning group inside them. Drives
+   * the options of the shared filter bar.
    */
   readonly visibleLocations = computed<readonly LocationGroup[]>(() => {
     const locations = this.organization.locations();
-    const scope = this.scope();
-    if (scope === 'all') {
+    if (this.scope() === 'all') {
       return locations;
     }
 
     const locationIds = this.assignedLocationIds();
-    const scoped = locations.filter((location) => locationIds.includes(location.id));
-    if (scope !== 'assigned-batches') {
-      return scoped;
-    }
-
-    const batchIds = this.assignedBatchIds();
-    return scoped
-      .map((location) => ({
-        ...location,
-        batches: location.batches.filter((batch) => batchIds.includes(batch.id)),
-      }))
-      .filter((location) => location.batches.length > 0);
+    return locations.filter((location) => locationIds.includes(location.id));
   });
 
   /** Whether the session holds a permission. */
@@ -130,14 +115,9 @@ export class AuthService {
     return this.permissions().includes(permission);
   }
 
-  /** Whether the session may see a location's data. */
+  /** Whether the session may see a location's data, and every batch inside it. */
   canAccessLocation(locationId: string): boolean {
     return this.scope() === 'all' || this.assignedLocationIds().includes(locationId);
-  }
-
-  /** Whether the session may see a batch's data. */
-  canAccessBatch(batchId: string): boolean {
-    return this.scope() !== 'assigned-batches' || this.assignedBatchIds().includes(batchId);
   }
 
   /**
@@ -224,11 +204,7 @@ export class AuthService {
    * self-service screen writes through. Permissions are dropped so they are
    * re-derived from the new role.
    */
-  setSessionRole(
-    role: UserRole,
-    locationIds: readonly string[] = [],
-    batchIds: readonly string[] = [],
-  ): void {
+  setSessionRole(role: UserRole, locationIds: readonly string[] = []): void {
     const user = this._user();
     if (!user) {
       return;
@@ -237,7 +213,6 @@ export class AuthService {
       ...user,
       role,
       locationIds: [...locationIds],
-      batchIds: [...batchIds],
       permissions: undefined,
       scope: undefined,
     };

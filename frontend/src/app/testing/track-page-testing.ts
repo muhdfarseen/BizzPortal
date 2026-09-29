@@ -32,9 +32,9 @@ export async function flushOverlay(): Promise<void> {
  * Drives one track page against a simulated server.
  *
  * Both pages are the same screen over different tracks, so both specs run the
- * same gestures through this: pick the filters, search, open a sub-tab, confirm
- * a move. The simulated server answers by the track the page asked for, so a
- * spec can assert which query each sub-tab made rather than only what it drew.
+ * same gestures through this: pick the filters, search, open the Initiate view,
+ * confirm a move. The simulated server answers by the track the page asked for,
+ * so a spec can assert which query each view made rather than only what it drew.
  */
 export class TrackPageHarness<T> {
   /** The track state the page's queries are answered from, mutated by moves. */
@@ -173,22 +173,23 @@ export class TrackPageHarness<T> {
     this.flushTraineesRequest(fixture, status);
   }
 
-  /** The sub-tab button with the given label. */
-  tabButton(fixture: ComponentFixture<T>, label: string): HTMLButtonElement {
-    const button = Array.from(
-      this.host(fixture).querySelectorAll<HTMLButtonElement>('.track-tab'),
-    ).find((candidate) => candidate.textContent?.trim() === label);
-    if (!button) {
-      throw new Error(`No track tab labelled "${label}"`);
-    }
-    return button;
-  }
-
-  /** Opens a sub-tab and answers the query it makes for that track. */
-  openTab(fixture: ComponentFixture<T>, label: string, status: string): void {
-    this.tabButton(fixture, label).click();
+  /** Clicks the page's Initiate button and answers the pool query it makes. */
+  startInitiate(fixture: ComponentFixture<T>, status: string): void {
+    this.host(fixture).querySelector<HTMLButtonElement>('.initiate-btn')?.click();
     fixture.detectChanges();
     this.flushTraineesRequest(fixture, status);
+  }
+
+  /** Clicks the Back button and answers the query for the page's own track. */
+  cancelInitiate(fixture: ComponentFixture<T>, status: string): void {
+    this.host(fixture).querySelector<HTMLButtonElement>('.initiate-btn')?.click();
+    fixture.detectChanges();
+    this.flushTraineesRequest(fixture, status);
+  }
+
+  /** The heading of the page on screen. */
+  heading(fixture: ComponentFixture<T>): string | undefined {
+    return this.host(fixture).querySelector('.page-title')?.textContent?.trim();
   }
 
   /** Employee ids of the rows on screen. */

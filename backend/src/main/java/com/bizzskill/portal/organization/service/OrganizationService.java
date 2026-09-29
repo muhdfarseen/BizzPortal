@@ -23,9 +23,10 @@ import java.util.stream.Collectors;
  * Builds the organisation tree the filter bar searches within.
  *
  * <p>This is where role scope becomes a data filter. A Location Admin sees only
- * their assigned locations; a Faculty member sees only their assigned batches,
- * and only the learning groups inside them. The filter is applied in the query,
- * not in the UI — hiding a row in the browser is not access control.
+ * their assigned locations; a Faculty member sees the same. Every batch and
+ * learning group inside an assigned location comes with it — access is granted
+ * per location, never per batch. The filter is applied in the query, not in the
+ * UI — hiding a row in the browser is not access control.
  *
  * <p>Costs three queries regardless of how large the organisation is, because the
  * levels are fetched in bulk and stitched together in memory. Walking the tree
@@ -69,9 +70,7 @@ public class OrganizationService {
                 .toList();
 
         List<Batch> visibleBatches = batches
-                .findByTxtIlpLocationIdInOrderByTxtBatchNameAsc(locationIds).stream()
-                .filter(batch -> maySeeBatch(caller, batch.getIntBatchId()))
-                .toList();
+                .findByTxtIlpLocationIdInOrderByTxtBatchNameAsc(locationIds);
 
         Map<Long, List<LearningGroup>> groupsByBatch = visibleBatches.isEmpty()
                 ? Map.of()
@@ -118,10 +117,6 @@ public class OrganizationService {
 
     private boolean maySeeLocation(PortalPrincipal caller, String locationId) {
         return !caller.isLocationRestricted() || caller.locationIds().contains(locationId);
-    }
-
-    private boolean maySeeBatch(PortalPrincipal caller, Long batchId) {
-        return !caller.isBatchRestricted() || caller.batchIds().contains(batchId);
     }
 
     /** Renders a date the way every response does — ISO ({@code 2026-01-06}), never a timestamp. */

@@ -11,6 +11,8 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinTable;
+import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
@@ -71,17 +73,26 @@ public class AppUser extends AuditableEntity {
     @Column(name = "datelast_login")
     private Instant dateLastLogin;
 
-    /** Locations this user may see, when the role's scope is not {@code all}. */
+    /** Locations this user may see, and every batch and group inside them. */
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "app_user_location", joinColumns = @JoinColumn(name = "intuser_id"))
     @Column(name = "txtlocation_id", length = 4)
     private Set<String> locationIds = new LinkedHashSet<>();
 
-    /** Batches this user may see, when the role's scope is {@code assigned-batches}. */
-    @ElementCollection(fetch = FetchType.LAZY)
-    @CollectionTable(name = "app_user_batch", joinColumns = @JoinColumn(name = "intuser_id"))
-    @Column(name = "intbatch_id")
-    private Set<Long> batchIds = new LinkedHashSet<>();
+    /**
+     * Permissions granted to this person on top of their role's.
+     *
+     * <p>Needed because a role cannot carry the difference between two faculty
+     * members, one of whom owns the Remedial track and one of whom owns both.
+     * Deliberately additive: a grant can only add, so this can never quietly take
+     * access away, and the role remains the floor every account starts from.
+     */
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "app_user_permission",
+            joinColumns = @JoinColumn(name = "intuser_id"),
+            inverseJoinColumns = @JoinColumn(name = "intpermission_id"))
+    private Set<AppPermission> extraPermissions = new LinkedHashSet<>();
 
     protected AppUser() {
         // Required by JPA.
@@ -125,12 +136,43 @@ public class AppUser extends AuditableEntity {
         this.role = role;
     }
 
-    /** Replaces the whole assignment set; the collections are owned by this user. */
-    public void replaceAssignments(Set<String> locations, Set<Long> batches) {
+    /** Replaces the whole assignment set; the collection is owned by this user. */
+    public void replaceAssignments(Set<String> locations) {
         this.locationIds.clear();
         this.locationIds.addAll(locations);
-        this.batchIds.clear();
-        this.batchIds.addAll(batches);
+    }
+
+    /**
+     * Replaces the per-user permission grants.
+     *
+     * <p>Whole-set, like the assignments, so an unticked box really does revoke
+     * that grant rather than leaving a stale one behind.
+     */
+    public void replaceExtraPermissions(Set<AppPermission> permissions) {
+        this.extraPermissions.clear();
+        this.extraPermissions.addAll(permissions);
+    }
+
+    /**
+     * Every permission this account holds: its role's, plus anything granted to
+     * the person directly.
+     *
+     * <p>The union is what the token and the API report, and the single place
+     * that combines them — a per-user grant that was not merged here would grant
+     * nothing, and merging it in two places is how the two drift apart.
+     */
+    public Set<String> effectivePermissionCodes() {
+        Set<String> codes = new LinkedHashSet<>();
+        role.getPermissions().stream()
+                .map(AppPermission::getTxtPermissionCode)
+                .forEach(codes::add);
+        extraPermissions.stream().map(AppPermission::getTxtPermissionCode).forEach(codes::add);
+        return codes;
+    }
+
+    /** The permissions granted to this person over and above their role's. */
+    public Set<AppPermission> getExtraPermissions() {
+        return extraPermissions;
     }
 
     public Long getIntUserId() {
@@ -187,9 +229,5 @@ public class AppUser extends AuditableEntity {
 
     public Set<String> getLocationIds() {
         return locationIds;
-    }
-
-    public Set<Long> getBatchIds() {
-        return batchIds;
     }
 }

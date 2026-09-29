@@ -17,7 +17,6 @@ import java.util.List;
  * @param role              the role code, e.g. {@code super-admin}.
  * @param scope             how far the role reaches.
  * @param requiresLocations whether this role must have at least one location.
- * @param requiresBatches   whether this role must have at least one batch.
  * @param permissions       permission codes, so the UI can hide what it cannot do.
  */
 public record PortalUserResponse(
@@ -29,9 +28,7 @@ public record PortalUserResponse(
         String roleName,
         String scope,
         boolean requiresLocations,
-        boolean requiresBatches,
         List<String> locationIds,
-        List<Long> batchIds,
         List<String> permissions,
         String status,
         Instant createdAt,
@@ -49,13 +46,9 @@ public record PortalUserResponse(
                 role.getTxtRoleName(),
                 role.getTxtScope().getCode(),
                 role.getTxtScope().requiresLocations(),
-                role.getTxtScope().requiresBatches(),
                 List.copyOf(user.getLocationIds()),
-                List.copyOf(user.getBatchIds()),
-                role.getPermissions().stream()
-                        .map(AppPermission::getTxtPermissionCode)
-                        .sorted()
-                        .toList(),
+                // The union, so the client hides an action the token would refuse.
+                user.effectivePermissionCodes().stream().sorted().toList(),
                 user.getTxtStatus().name().toLowerCase(),
                 user.getDateCreatedOn(),
                 user.getDateLastLogin());

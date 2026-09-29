@@ -177,7 +177,8 @@ const ALL_PERMISSIONS = [
   'assessments.view',
   'configuration.manage',
   'dashboard.view',
-  'lap-remedial.manage',
+  'lap-remedial.lap-manage',
+  'lap-remedial.remedial-manage',
   'lap-remedial.view',
   'reports.view',
   'users.manage',
@@ -191,17 +192,34 @@ const LOCATION_ADMIN_PERMISSIONS = [
   'assessments.edit',
   'assessments.view',
   'dashboard.view',
-  'lap-remedial.manage',
+  'lap-remedial.lap-manage',
+  'lap-remedial.remedial-manage',
   'lap-remedial.view',
   'reports.view',
 ];
 
+/** The base faculty role: records results and reads the tracks, moves nothing. */
 const FACULTY_PERMISSIONS = [
   'assessments.edit',
   'assessments.view',
   'dashboard.view',
   'lap-remedial.view',
   'reports.view',
+];
+
+/**
+ * The same faculty, granted one track management on the account itself — what
+ * ticking the box in User Management does.
+ */
+const FACULTY_REMEDIAL_PERMISSIONS = [
+  ...FACULTY_PERMISSIONS,
+  'lap-remedial.remedial-manage',
+];
+
+/** The same faculty, granted both track managements. */
+const FACULTY_LAP_REMEDIAL_PERMISSIONS = [
+  ...FACULTY_REMEDIAL_PERMISSIONS,
+  'lap-remedial.lap-manage',
 ];
 
 /** One account per role, mirroring `GET /api/auth/me`. */
@@ -215,9 +233,7 @@ export const API_USERS: Record<string, ApiPortalUser> = {
     roleName: 'Super Admin',
     scope: 'all',
     requiresLocations: false,
-    requiresBatches: false,
     locationIds: [],
-    batchIds: [],
     permissions: ALL_PERMISSIONS,
     status: 'active',
     createdAt: '2026-09-13T09:01:56.332964Z',
@@ -232,9 +248,7 @@ export const API_USERS: Record<string, ApiPortalUser> = {
     roleName: 'Program Manager',
     scope: 'all',
     requiresLocations: false,
-    requiresBatches: false,
     locationIds: [],
-    batchIds: [],
     permissions: MANAGER_PERMISSIONS,
     status: 'active',
     createdAt: '2026-02-11T00:00:00Z',
@@ -248,9 +262,7 @@ export const API_USERS: Record<string, ApiPortalUser> = {
     roleName: 'Location Admin',
     scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: false,
     locationIds: ['KOC'],
-    batchIds: [],
     permissions: LOCATION_ADMIN_PERMISSIONS,
     status: 'active',
     createdAt: '2026-01-01T00:00:00Z',
@@ -262,12 +274,38 @@ export const API_USERS: Record<string, ApiPortalUser> = {
     email: 'fac@bizzskill.local',
     role: 'faculty',
     roleName: 'Faculty',
-    scope: 'assigned-batches',
+    scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: true,
     locationIds: ['BLR'],
-    batchIds: [103],
     permissions: FACULTY_PERMISSIONS,
+    status: 'active',
+    createdAt: '2026-01-01T00:00:00Z',
+  },
+  '10297': {
+    employeeId: '10297',
+    username: 'facultyrem',
+    name: 'Meera Iyer',
+    email: 'facrem@bizzskill.local',
+    role: 'faculty',
+    roleName: 'Faculty',
+    scope: 'assigned-locations',
+    requiresLocations: true,
+    locationIds: ['BLR'],
+    permissions: FACULTY_REMEDIAL_PERMISSIONS,
+    status: 'active',
+    createdAt: '2026-01-01T00:00:00Z',
+  },
+  '10298': {
+    employeeId: '10298',
+    username: 'facultyboth',
+    name: 'Arjun Menon',
+    email: 'facboth@bizzskill.local',
+    role: 'faculty',
+    roleName: 'Faculty',
+    scope: 'assigned-locations',
+    requiresLocations: true,
+    locationIds: ['BLR'],
+    permissions: FACULTY_LAP_REMEDIAL_PERMISSIONS,
     status: 'active',
     createdAt: '2026-01-01T00:00:00Z',
   },
@@ -280,9 +318,7 @@ export const API_USERS: Record<string, ApiPortalUser> = {
     roleName: 'Location Admin',
     scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: false,
     locationIds: ['CHN'],
-    batchIds: [],
     permissions: LOCATION_ADMIN_PERMISSIONS,
     status: 'inactive',
     createdAt: '2026-05-09T00:00:00Z',
@@ -300,6 +336,10 @@ export const SIGN_IN = {
   programManager: '20117',
   locationAdmin: '10295',
   faculty: '10296',
+  /** Faculty granted Remedial management on their own account. */
+  facultyRemedial: '10297',
+  /** Faculty granted both track managements on their own account. */
+  facultyLapRemedial: '10298',
   inactive: '31904',
 } as const;
 
@@ -311,7 +351,6 @@ export const API_ROLES: readonly ApiRoleDefinition[] = [
     description: 'Full access to every location, plus user management and exam configuration.',
     scope: 'all',
     requiresLocations: false,
-    requiresBatches: false,
     permissions: ALL_PERMISSIONS,
   },
   {
@@ -320,7 +359,6 @@ export const API_ROLES: readonly ApiRoleDefinition[] = [
     description: 'Access to the data of every location. Cannot manage users or exam configuration.',
     scope: 'all',
     requiresLocations: false,
-    requiresBatches: false,
     permissions: MANAGER_PERMISSIONS,
   },
   {
@@ -329,16 +367,15 @@ export const API_ROLES: readonly ApiRoleDefinition[] = [
     description: 'Access to the data of the assigned locations only.',
     scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: false,
     permissions: LOCATION_ADMIN_PERMISSIONS,
   },
   {
     id: 'faculty',
     label: 'Faculty',
-    description: 'Access to the assigned batches only. Records results but cannot manage tracks.',
-    scope: 'assigned-batches',
+    description:
+      'Access to the assigned batches only. Records results and can see the tracks. Which tracks they may initiate and close is set per person, below the role.',
+    scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: true,
     permissions: FACULTY_PERMISSIONS,
   },
 ];
@@ -353,7 +390,16 @@ export const API_PERMISSIONS: readonly ApiPermissionDefinition[] = [
     label: 'View LAP / Remedial',
     description: 'See LAP / Remedial tracks',
   },
-  { id: 'lap-remedial.manage', label: 'Manage LAP / Remedial', description: 'Move trainees' },
+  {
+    id: 'lap-remedial.remedial-manage',
+    label: 'Manage Remedial',
+    description: 'Initiate and close Remedial tracks',
+  },
+  {
+    id: 'lap-remedial.lap-manage',
+    label: 'Manage LAP',
+    description: 'Initiate and close LAP tracks',
+  },
   { id: 'reports.view', label: 'Reports', description: 'View reports' },
   { id: 'users.manage', label: 'User Management', description: 'Manage portal users' },
   { id: 'configuration.manage', label: 'Exam Configuration', description: 'Edit exams' },

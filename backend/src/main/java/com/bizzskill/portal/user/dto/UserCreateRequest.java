@@ -17,10 +17,9 @@ import java.util.List;
  * @param role       the role code, e.g. {@code location-admin}.
  * @param locationIds locations to assign. Required when the role's scope is not
  *                   {@code all}, checked in the service because it depends on the
- *                   role being looked up.
- * @param batchIds   batches to assign. Required when the scope is
- *                   {@code assigned-batches}, and each must sit inside one of the
- *                   assigned locations.
+ *                   role being looked up. Every batch and learning group inside an
+ *                   assigned location comes with it; there is no batch-level
+ *                   assignment.
  * @param password   optional. When omitted a strong temporary password is generated
  *                   and returned once in the response, so account creation never
  *                   silently falls back to a guessable default.
@@ -43,11 +42,23 @@ public record UserCreateRequest(
 
         List<String> locationIds,
 
-        List<Long> batchIds,
-
         @Pattern(regexp = "active|inactive", message = "Choose active or inactive.")
         String status,
 
         @Size(min = 8, max = 100, message = "Use at least 8 characters.")
-        String password) {
+        String password,
+
+        /**
+         * Track permissions to grant this person, over and above their role's.
+         * Only the two track codes are accepted; anything else is refused rather
+         * than ignored, so a crafted request cannot grant itself {@code
+         * users.manage}.
+         *
+         * <p>Validated per element: {@code @Pattern} does not apply to a list, so
+         * the constraint has to sit on the type argument.
+         */
+        List<@Pattern(
+                regexp = "lap-remedial\\.remedial-manage|lap-remedial\\.lap-manage",
+                message = "Choose only the LAP and Remedial management permissions.") String>
+        trackPermissions) {
 }

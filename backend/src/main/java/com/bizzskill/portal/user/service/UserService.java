@@ -10,8 +10,6 @@ import com.bizzskill.portal.common.web.PageResponse;
 import com.bizzskill.portal.common.web.SortQuery;
 import com.bizzskill.portal.common.error.NotFoundException;
 import com.bizzskill.portal.common.error.RequestValidationException;
-import com.bizzskill.portal.organization.entity.Batch;
-import com.bizzskill.portal.organization.repository.BatchRepository;
 import com.bizzskill.portal.organization.repository.BizLocationRepository;
 import com.bizzskill.portal.user.dto.CreatedUserResponse;
 import com.bizzskill.portal.user.dto.PermissionResponse;
@@ -19,6 +17,7 @@ import com.bizzskill.portal.user.dto.PortalUserResponse;
 import com.bizzskill.portal.user.dto.RoleResponse;
 import com.bizzskill.portal.user.dto.UserCreateRequest;
 import com.bizzskill.portal.user.dto.UserUpdateRequest;
+import com.bizzskill.portal.user.entity.AppPermission;
 import com.bizzskill.portal.user.entity.AppRole;
 import com.bizzskill.portal.user.entity.AppUser;
 import com.bizzskill.portal.user.repository.AppPermissionRepository;
@@ -47,15 +46,12 @@ import java.util.Set;
 /**
  * Portal account management.
  *
- * <p>Three rules are enforced here rather than left to the UI, because all three
- * are ways to lock the organisation out of its own portal:
+ * <p>Two rules are enforced here rather than left to the UI, because both are ways
+ * to lock the organisation out of its own portal:
  *
  * <ol>
  *   <li>Assignments must match the role's scope — a Location Admin with no location
  *       sees nothing, and a role that reaches everywhere has nothing to assign.
- *   <li>A batch must sit inside one of the assigned locations, otherwise the two
- *       assignments contradict each other and the scope filter silently hides data
- *       the administrator believes they granted.
  *   <li>You cannot delete or deactivate yourself, and the last active Super Admin
  *       cannot be removed. Either would leave nobody able to manage users.
  * </ol>
@@ -100,7 +96,6 @@ public class UserService {
     private final AppRoleRepository roles;
     private final AppPermissionRepository permissions;
     private final BizLocationRepository locations;
-    private final BatchRepository batches;
     private final PasswordEncoder passwordEncoder;
     private final SecureRandom random = new SecureRandom();
 
@@ -109,13 +104,11 @@ public class UserService {
             AppRoleRepository roles,
             AppPermissionRepository permissions,
             BizLocationRepository locations,
-            BatchRepository batches,
             PasswordEncoder passwordEncoder) {
         this.users = users;
         this.roles = roles;
         this.permissions = permissions;
         this.locations = locations;
-        this.batches = batches;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -179,8 +172,7 @@ public class UserService {
         }
 
         AppRole role = requireRole(request.role());
-        Assignments assignments = validateAssignments(
-                role, request.locationIds(), request.batchIds(), null);
+        Assignments assignments = validateAssignments(role, request.locationIds());
 
         String generated = null;
         String password = request.password();
@@ -196,8 +188,9 @@ public class UserService {
                 trimToNull(request.email()),
                 passwordEncoder.encode(password),
                 role);
-        user.replaceAssignments(assignments.locations(), assignments.batches());
+        user.replaceAssignments(assignments.locations());
         user.setTxtStatus(toStatus(request.status()));
+        user.replaceExtraPermissions(resolveTrackPermissions(request.trackPermissions()));
 
         AppUser saved = users.save(user);
         log.info("Created account {} ({})", saved.getTxtUsername(), role.getTxtRoleCode());
@@ -210,8 +203,7 @@ public class UserService {
     public PortalUserResponse update(Long employeeId, UserUpdateRequest request, Long actorEmployeeId) {
         AppUser user = requireUser(employeeId);
         AppRole role = requireRole(request.role());
-        Assignments assignments = validateAssignments(
-                role, request.locationIds(), request.batchIds(), employeeId);
+        Assignments assignments = validateAssignments(role, request.locationIds());
 
         Status status = toStatus(request.status());
         boolean losingSuperAdmin =
@@ -228,10 +220,43 @@ public class UserService {
         user.rename(request.name().trim());
         user.setTxtEmail(trimToNull(request.email()));
         user.assignRole(role);
-        user.replaceAssignments(assignments.locations(), assignments.batches());
+        user.replaceAssignments(assignments.locations());
         user.setTxtStatus(status);
+        // Only replaced when the field was sent, so a caller that never mentions
+        // track permissions does not silently revoke them.
+        if (request.trackPermissions() != null) {
+            user.replaceExtraPermissions(resolveTrackPermissions(request.trackPermissions()));
+        }
 
         return PortalUserResponse.from(user);
+    }
+
+    /**
+     * Resolves the requested track permissions to their rows.
+     *
+     * <p>Only the two track codes are looked up, and an unrecognised code is
+     * refused rather than dropped. The bean validation on the request already
+     * rejects a bad code, but the lookup is the boundary that matters: were it to
+     * skip what it did not recognise, a request naming {@code users.manage}
+     * would be stored as "no extra permissions" and the caller would believe it
+     * had been granted.
+     */
+    private Set<AppPermission> resolveTrackPermissions(List<String> requested) {
+        if (requested == null || requested.isEmpty()) {
+            return Set.of();
+        }
+
+        Set<AppPermission> resolved = new LinkedHashSet<>();
+        for (String code : requested) {
+            AppPermission permission = permissions
+                    .findAllByOrderByIntSortOrderAsc().stream()
+                    .filter(candidate -> candidate.getTxtPermissionCode().equals(code))
+                    .findFirst()
+                    .orElseThrow(() -> new RequestValidationException(List.of(
+                            new FieldViolation("trackPermissions", "There is no permission called '" + code + "'."))));
+            resolved.add(permission);
+        }
+        return resolved;
     }
 
     /**
@@ -258,26 +283,22 @@ public class UserService {
     // ── Validation ──────────────────────────────────────────────────────────
 
     /**
-     * Checks that the assignments make sense for the role, and that the batches
-     * really sit inside the assigned locations.
+     * Checks that the assignments make sense for the role.
      *
-     * @param editingEmployeeId the account being edited, or {@code null} on create;
-     *                          carried only so error messages can be specific.
+     * <p>Locations are the only assignment: a location-scoped role reaches every
+     * batch and learning group inside the locations it is given, so there is
+     * nothing batch-level left to validate.
      */
-    private Assignments validateAssignments(
-            AppRole role, List<String> locationIds, List<Long> batchIds, Long editingEmployeeId) {
+    private Assignments validateAssignments(AppRole role, List<String> locationIds) {
 
         RoleScope scope = role.getTxtScope();
         Set<String> requestedLocations = locationIds == null
                 ? new LinkedHashSet<>()
                 : new LinkedHashSet<>(locationIds);
-        Set<Long> requestedBatches = batchIds == null
-                ? new LinkedHashSet<>()
-                : new LinkedHashSet<>(batchIds);
 
         List<FieldViolation> violations = new ArrayList<>();
 
-        if (!scope.requiresLocations() && (!requestedLocations.isEmpty() || !requestedBatches.isEmpty())) {
+        if (!scope.requiresLocations() && !requestedLocations.isEmpty()) {
             violations.add(new FieldViolation(
                     "locationIds",
                     "The " + role.getTxtRoleName() + " role reaches every location, so it takes no assignments."));
@@ -287,20 +308,14 @@ public class UserService {
                     "locationIds",
                     "Assign at least one location to a " + role.getTxtRoleName() + "."));
         }
-        if (scope.requiresBatches() && requestedBatches.isEmpty()) {
-            violations.add(new FieldViolation(
-                    "batchIds",
-                    "Assign at least one batch to a " + role.getTxtRoleName() + "."));
-        }
 
         validateLocationIdsExist(requestedLocations, violations);
-        validateBatchesBelongToLocations(requestedBatches, requestedLocations, violations);
 
         if (!violations.isEmpty()) {
             throw new RequestValidationException(violations);
         }
 
-        return new Assignments(requestedLocations, requestedBatches);
+        return new Assignments(requestedLocations);
     }
 
     private void validateLocationIdsExist(Set<String> requested, List<FieldViolation> violations) {
@@ -308,41 +323,6 @@ public class UserService {
             if (!locations.existsById(locationId)) {
                 violations.add(new FieldViolation(
                         "locationIds", "There is no location with the code '" + locationId + "'."));
-            }
-        }
-    }
-
-    /**
-     * Every assigned batch must belong to one of the assigned locations.
-     *
-     * <p>Without this an administrator can grant batch 103 while assigning only
-     * Kochi, and the batch's own location — Bangalore — is filtered out of every
-     * query, so the grant silently does nothing.
-     */
-    private void validateBatchesBelongToLocations(
-            Set<Long> requestedBatches, Set<String> requestedLocations, List<FieldViolation> violations) {
-
-        if (requestedBatches.isEmpty()) {
-            return;
-        }
-
-        List<Batch> found = batches.findByIntBatchIdInOrderByTxtBatchNameAsc(requestedBatches);
-        Set<Long> resolved = new LinkedHashSet<>();
-
-        for (Batch batch : found) {
-            resolved.add(batch.getIntBatchId());
-            if (!requestedLocations.contains(batch.getTxtIlpLocationId())) {
-                violations.add(new FieldViolation(
-                        "batchIds",
-                        "'" + batch.getTxtBatchName() + "' belongs to location "
-                                + batch.getTxtIlpLocationId() + ", which is not assigned."));
-            }
-        }
-
-        for (Long batchId : requestedBatches) {
-            if (!resolved.contains(batchId)) {
-                violations.add(new FieldViolation(
-                        "batchIds", "There is no batch with id " + batchId + "."));
             }
         }
     }
@@ -404,7 +384,7 @@ public class UserService {
         return password.toString();
     }
 
-    /** The validated assignment sets. */
-    private record Assignments(Set<String> locations, Set<Long> batches) {
+    /** The validated location assignments. */
+    private record Assignments(Set<String> locations) {
     }
 }

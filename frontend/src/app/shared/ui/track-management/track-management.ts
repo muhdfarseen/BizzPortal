@@ -1,5 +1,6 @@
 import { Component, computed, inject, input, signal, viewChild } from '@angular/core';
 import { LapRemedialStatus, TraineeAssessment } from '../../../core/models/assessment.model';
+import { Permission } from '../../../core/models/user.model';
 import { DEFAULT_PAGE_SIZE, FIRST_PAGE, SortDirection } from '../../../core/models/page.model';
 import { AssessmentService } from '../../../core/services/assessment.service';
 import { AuthService } from '../../../core/services/auth.service';
@@ -18,32 +19,63 @@ import {
   LapRemedialDialogComponent,
 } from '../lap-remedial-dialog/lap-remedial-dialog';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { reiconSearchNormal2, reiconCloseCircle } from '@ng-icons/reicon';
+import { reiconArrowLeft2, reiconSearchNormal2, reiconCloseCircle } from '@ng-icons/reicon';
 
 /**
- * One sub-tab of a track page: which trainees it lists and what may be done to
- * them there.
+ * How a track page is configured.
  *
- * A page supplies its two tabs and nothing else — the query, the actions, the
- * empty guidance and the columns all follow from the track the tab filters on,
- * so the Remedial and LAP pages stay two thin configurations of one screen.
+ * A page supplies its title, the track it lists, the actions those trainees may
+ * be given, and the one placement it can make. The page always shows the track
+ * it is for, and the Initiate button swaps the whole screen for the pool the
+ * placement is made from, so the two things an administrator does — see who is
+ * on the track, and put somebody on it — are one screen and one button rather
+ * than two sub-tabs.
  */
-export interface TrackTab {
-  /** Track the tab filters on, sent as the query's `status`. */
+export interface TrackPage {
+  /** Heading of the current view, e.g. `Remedial`. */
+  title: string;
+  /** Track the page lists while viewing who is on it. */
   status: LapRemedialStatus;
-  /** Button text of the sub-tab. */
-  label: string;
-  /** Row actions offered on this tab, gated on `lap-remedial.manage`. */
+  /** Row actions offered on the track, gated on that track's manage permission. */
   actions: readonly AssessmentRowAction[];
-  /** Guidance shown when the tab holds no trainees. */
+  /** Guidance shown when the track holds no trainees. */
   emptyHint: string;
-  /**
-   * Whether the tab's rows carry a start date and the remark they arrived with.
-   * A trainee being placed onto a track has neither yet, so the initiating tab
-   * leaves those columns off.
-   */
-  showsTrackColumns: boolean;
+  /** The one placement this page makes, and the pool it is made from. */
+  initiate: {
+    /** Heading while initiating, e.g. `Initiate LAP`, and the dialog's title. */
+    title: string;
+    /** Track a placement is made from — the pool the initiate view lists. */
+    from: LapRemedialStatus;
+    /** Row actions offered on the pool. */
+    actions: readonly AssessmentRowAction[];
+    /** Guidance shown when the pool is empty. */
+    emptyHint: string;
+    /**
+     * Whether the pool's rows carry a start date and the remark they arrived
+     * with. A trainee being placed onto a track from no track has neither, so
+     * the pool leaves those columns off unless it is another track's trainees.
+     */
+    showsTrackColumns: boolean;
+  };
 }
+
+/**
+ * Header of the start date column on each track's table.
+ *
+ * A trainee has a start date per track, and the same column shows whichever one
+ * the view is listing, so it is named for that track: the LAP table shows
+ * `LAP Start Date`, and the Initiate LAP pool — whose trainees are on Remedial —
+ * shows `Remedial Start Date`. A bare "Start Date" left the reader guessing which
+ * of the two they were reading.
+ *
+ * <p>Only the two tracks a trainee can be placed on are named. A trainee on no
+ * track has no start date, so that view carries no column to head, and a closed
+ * track is left as history rather than listed.
+ */
+const START_DATE_HEADERS: Partial<Record<LapRemedialStatus, string>> = {
+  lap: 'LAP Start Date',
+  remedial: 'Remedial Start Date',
+};
 
 /** The track a row action moves a trainee onto. */
 const ACTION_TARGETS: Record<string, LapRemedialStatus> = {
@@ -64,25 +96,28 @@ const SORT_KEYS: Record<string, string> = {
 };
 
 /**
- * LAP / Remedial track page: the filter bar, the sub-tabs and the trainees of
- * the tab on screen.
+ * LAP / Remedial track page: the filter bar, the trainees on this track, the
+ * Initiate button and the search box.
  *
- * One screen, configured rather than copied: a page names its title and its two
- * tabs — the one that places trainees onto the track and the one that lists who
- * is on it — and this renders both against the same server-paged query. Every
+ * One screen, configured rather than copied: a page names its title, the track
+ * it lists, the actions those trainees may be given and the one placement it
+ * makes. Initiate swaps the screen for the pool the placement is made from — with
+ * the heading following, so it always says which of the two is on screen. Every
  * change is confirmed in a dialog that records a remark, and the remark given
- * with a move is what the destination tab's table shows, so each track knows why
- * its trainees arrived.
+ * with a move is what the destination track's table shows, so each track knows
+ * why its trainees arrived.
  *
- * Each tab is its own server-paged query: the track is sent as the `status`
- * filter, so the pager counts the tab rather than the whole group and the page
+ * Each view is its own server-paged query: the track is sent as the `status`
+ * filter, so the pager counts the view rather than the whole group and the page
  * on screen is never a slice of something larger.
  */
 @Component({
   selector: 'app-track-management',
   standalone: true,
   imports: [FilterBarComponent, AssessmentTableComponent, LapRemedialDialogComponent, NgIcon],
-  providers: [provideIcons({ reiconSearchNormal2, reiconCloseCircle })],
+  providers: [
+    provideIcons({ reiconArrowLeft2, reiconSearchNormal2, reiconCloseCircle }),
+  ],
   templateUrl: './track-management.html',
   styleUrl: './track-management.css',
 })
@@ -93,11 +128,8 @@ export class TrackManagementComponent {
 
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-  /** Heading of the page, e.g. `Remedial`. */
-  readonly title = input.required<string>();
-
-  /** The page's sub-tabs, in display order; the first opens with the page. */
-  readonly tabs = input.required<readonly TrackTab[]>();
+  /** How the page is configured; supplies the title, track and Initiate. */
+  readonly page = input.required<TrackPage>();
 
   /** What the search box shows. */
   protected readonly draftQuery = signal('');
@@ -146,23 +178,21 @@ export class TrackManagementComponent {
   private readonly sort = signal<string | undefined>(undefined);
   private readonly direction = signal<SortDirection | undefined>(undefined);
 
-  /** The sub-tab on screen; unset until a selection, so the first tab opens. */
-  private readonly selectedTab = signal<LapRemedialStatus | undefined>(undefined);
-
   /** The track change awaiting its confirmation dialog, if any. */
   readonly confirming = signal<LapRemedialChangeRequest | null>(null);
 
   private readonly resultsTable = viewChild(AssessmentTableComponent);
 
+  /** Whether the Initiate view — the pool a placement is made from — is on screen. */
+  readonly initiating = signal(false);
+
   /**
-   * The tab on screen. Read through the first tab rather than seeded in a field,
-   * so the page opens on its initiating tab however the inputs arrive.
+   * Heading of the screen: the page's own while viewing who is on the track, and
+   * the placement's own while initiating, so the two are never confused.
    */
-  readonly activeTab = computed<TrackTab | undefined>(() => {
-    const tabs = this.tabs();
-    const selected = this.selectedTab();
-    return tabs.find((tab) => tab.status === selected) ?? tabs[0];
-  });
+  readonly heading = computed(() =>
+    this.initiating() ? this.page().initiate.title : this.page().title,
+  );
 
   /** Whether a search has been run — drives the empty state. */
   readonly hasSearched = computed(() => this.searchedFilter() !== null);
@@ -190,21 +220,60 @@ export class TrackManagementComponent {
   });
 
   /**
-   * Row actions of the visible tab: moving a trainee along a track needs
-   * `lap-remedial.manage`, so a role without it (Faculty) reads the tabs only.
+   * Row actions of the view on screen: moving a trainee along a track needs that
+   * track's manage permission, and the two are granted separately, so a manager of
+   * Remedial is offered nothing on the LAP table.
    */
-  readonly rowActions = computed<readonly AssessmentRowAction[]>(() =>
-    this.auth.has('lap-remedial.manage') ? (this.activeTab()?.actions ?? []) : [],
+  readonly rowActions = computed<readonly AssessmentRowAction[]>(() => {
+    if (!this.auth.has(this.managePermission())) {
+      return [];
+    }
+    const page = this.page();
+    return this.initiating() ? page.initiate.actions : page.actions;
+  });
+
+  /**
+   * Whether the rows on screen show the track columns: start date and remark.
+   * A trainee on no track has neither, so the Initiate Remedial pool — the
+   * trainees placed from no track — leaves those columns off.
+   */
+  readonly showsTrackColumns = computed(() =>
+    this.initiating() ? this.page().initiate.showsTrackColumns : true,
   );
 
-  /** Whether the tab on screen shows the track columns: start date and remark. */
-  readonly showsTrackColumns = computed(() => this.activeTab()?.showsTrackColumns === true);
+  /**
+   * Header of the start date column, naming the track the dates on screen
+   * belong to — the LAP table reads `LAP Start Date`, the Initiate LAP pool
+   * reads `Remedial Start Date`, because the dates in it are the Remedial ones.
+   */
+  readonly startDateHeader = computed(
+    () => START_DATE_HEADERS[this.activeStatus()] ?? 'Start Date',
+  );
 
-  /** Guidance for the tab on screen when it holds no trainees. */
-  readonly emptyTabHint = computed(() => this.activeTab()?.emptyHint ?? '');
+  /**
+   * The permission that governs the track on screen.
+   *
+   * <p>LAP and Remedial are granted separately, so the page names its own track
+   * and the whole screen — Initiate button, row actions, the dialog — follows it.
+   * Deriving it here rather than checking two permissions in each place is what
+   * keeps a Remedial-only manager from being offered anything on the LAP page.
+   */
+  private managePermission(): Permission {
+    return this.page().status === 'lap'
+      ? 'lap-remedial.lap-manage'
+      : 'lap-remedial.remedial-manage';
+  }
+
+  /** Guidance for the view on screen when it holds no trainees. */
+  readonly emptyHint = computed(() =>
+    this.initiating() ? this.page().initiate.emptyHint : this.page().emptyHint,
+  );
+
+  /** Whether this user may move trainees on this track, and so sees Initiate. */
+  readonly canManage = computed(() => this.auth.has(this.managePermission()));
 
   /** Accessible name of the results region, e.g. `Remedial trainees`. */
-  readonly resultsLabel = computed(() => `${this.title()} trainees`);
+  readonly resultsLabel = computed(() => `${this.heading()} trainees`);
 
   onFilterChange(state: FilterState): void {
     this.pendingFilter.set(state);
@@ -226,19 +295,20 @@ export class TrackManagementComponent {
     this.resultsTable()?.resetPage();
   }
 
-  /** Reads one page of the tab on screen into {@link rows}. */
+  /** The track the view on screen is querying: this page's, or the Initiate pool. */
+  private activeStatus(): LapRemedialStatus {
+    return this.initiating() ? this.page().initiate.from : this.page().status;
+  }
+
+  /** Reads one page of the view on screen into {@link rows}. */
   private loadTrainees(filter: FilterState): void {
-    const tab = this.activeTab();
-    if (!tab) {
-      return;
-    }
     this.loading.set(true);
     this.assessments
       .getTrainees(filter, {
         page: this.pageIndex(),
         size: this.pageSize(),
         search: this.search(),
-        status: tab.status,
+        status: this.activeStatus(),
         sort: this.sort(),
         direction: this.direction(),
       })
@@ -305,13 +375,30 @@ export class TrackManagementComponent {
     this.loadTrainees(filter);
   }
 
-  selectTab(status: LapRemedialStatus): void {
-    if (status === this.activeTab()?.status) {
+  /**
+   * Opens the Initiate view: the pool the placement is made from.
+   *
+   * A view of its own, so it is counted by the server separately and the pager
+   * returns to the first page rather than a page that may not exist in it.
+   */
+  startInitiate(): void {
+    if (this.initiating()) {
       return;
     }
-    this.selectedTab.set(status);
-    // Tabs are counted separately by the server, so a page deep into one tab
-    // may not exist in the next.
+    this.initiating.set(true);
+    this.pageIndex.set(FIRST_PAGE);
+    const filter = this.searchedFilter();
+    if (filter) {
+      this.loadTrainees(filter);
+    }
+  }
+
+  /** Returns from the Initiate view to the trainees on the track. */
+  cancelInitiate(): void {
+    if (!this.initiating()) {
+      return;
+    }
+    this.initiating.set(false);
     this.pageIndex.set(FIRST_PAGE);
     const filter = this.searchedFilter();
     if (filter) {

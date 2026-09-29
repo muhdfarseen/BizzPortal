@@ -102,7 +102,6 @@ export class UserService {
             description: role.description,
             scope: role.scope as RoleDefinition['scope'],
             requiresLocations: role.requiresLocations,
-            requiresBatches: role.requiresBatches,
             permissions: [...role.permissions] as RoleDefinition['permissions'],
           })),
         );
@@ -163,12 +162,8 @@ export class UserService {
    * editable; the API answers with the updated account.
    */
   updateUser(employeeId: string, changes: Omit<UserDraft, 'employeeId'>): Observable<PortalUser> {
-    const { batchIds, locationIds } = normalizeAssignments(
-      changes.role,
-      changes.locationIds,
-      changes.batchIds,
-    );
-    const payload = { ...this.toPayload({ employeeId, ...changes }), locationIds, batchIds };
+    const { locationIds } = normalizeAssignments(changes.role, changes.locationIds);
+    const payload = { ...this.toPayload({ employeeId, ...changes }), locationIds };
 
     return this.http
       .patch<ApiPortalUser>(`${this.baseUrl}/${encodeURIComponent(employeeId)}`, payload)
@@ -182,19 +177,17 @@ export class UserService {
 
   /** The request body both create and update share. */
   private toPayload(draft: UserDraft): Record<string, unknown> {
-    const { locationIds, batchIds } = normalizeAssignments(
-      draft.role,
-      draft.locationIds,
-      draft.batchIds,
-    );
+    const { locationIds } = normalizeAssignments(draft.role, draft.locationIds);
     return {
       employeeId: draft.employeeId.trim(),
       name: draft.name.trim(),
       email: draft.email.trim(),
       role: draft.role,
       locationIds,
-      batchIds,
       status: draft.status,
+      // The whole set, so unticking a box revokes that grant rather than
+      // leaving the previous one in place.
+      trackPermissions: [...(draft.trackPermissions ?? [])],
     };
   }
 }

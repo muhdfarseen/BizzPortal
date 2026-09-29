@@ -17,6 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -48,6 +51,10 @@ class PortalApiIntegrationTest {
 
     private String adminToken;
     private String facultyToken;
+    /** Faculty granted Remedial management on their own account, never LAP. */
+    private String remedialFacultyToken;
+    /** Faculty granted both track managements on their own account. */
+    private String lapRemedialFacultyToken;
 
     /**
      * A two-location, two-batch fixture, so every scoping assertion has something
@@ -88,28 +95,57 @@ class PortalApiIntegrationTest {
                 on conflict do nothing
                 """);
 
-        // Faculty, assigned to batch 9001 only — so 9002 and its trainee are out of scope.
-        jdbc.update("""
-                insert into app_user (intemployee_id, txtusername, txtname, txtemail, txtpassword,
-                                      introle_id, txtstatus, txtcreated_by)
-                select 70009, 'faculty1', 'Divya Sharma', 'fac1@test.local', 'Fac@123',
-                       r.introle_id, 'A', 'test'
-                from app_role r where r.txtrole_code = 'faculty'
-                on conflict (intemployee_id) do nothing
-                """);
-        jdbc.update("""
-                insert into app_user_location (intuser_id, txtlocation_id)
-                select u.intuser_id, 'KOC' from app_user u where u.txtusername = 'faculty1'
-                on conflict do nothing
-                """);
-        jdbc.update("""
-                insert into app_user_batch (intuser_id, intbatch_id)
-                select u.intuser_id, 9001 from app_user u where u.txtusername = 'faculty1'
-                on conflict do nothing
-                """);
+        // Faculty, assigned the Kochi location — so batch 9002 at Trivandrum and its
+        // trainee are out of scope.
+        // Three of them, one per faculty role, so the split between the two track
+        // permissions is exercised against the real database rather than asserted
+        // only in the matrix.
+        seedFaculty(70009L, "faculty1", "Divya Sharma", "fac1@test.local", "faculty");
+        seedFaculty(70021L, "facultyrem", "Meera Iyer", "facrem@test.local", "faculty");
+        seedFaculty(70022L, "facultyboth", "Arjun Menon", "facboth@test.local", "faculty");
+
+        // The two faculty accounts differ only in the track permissions granted
+        // to the account itself, which is what ticking the box in User
+        // Management does. Neither is a different role.
+        grantTrackPermissions("facultyrem", "lap-remedial.remedial-manage");
+        grantTrackPermissions("facultyboth",
+                "lap-remedial.remedial-manage", "lap-remedial.lap-manage");
 
         adminToken = signIn("admin", "Admin@123");
         facultyToken = signIn("faculty1", "Fac@123");
+        remedialFacultyToken = signIn("facultyrem", "Fac@123");
+        lapRemedialFacultyToken = signIn("facultyboth", "Fac@123");
+    }
+
+    /** Grants track permissions to one account, over and above its role's. */
+    private void grantTrackPermissions(String username, String... codes) {
+        for (String code : codes) {
+            jdbc.update("""
+                    insert into app_user_permission (intuser_id, intpermission_id)
+                    select u.intuser_id, p.intpermission_id
+                    from app_user u, app_permission p
+                    where u.txtusername = ? and p.txtpermission_code = ?
+                    on conflict do nothing
+                    """, username, code);
+        }
+    }
+
+    /** One faculty account on the named role, scoped to the Kochi location. */
+    private void seedFaculty(long employeeId, String username, String name, String email, String role) {
+        jdbc.update("""
+                insert into app_user (intemployee_id, txtusername, txtname, txtemail, txtpassword,
+                                      introle_id, txtstatus, txtcreated_by)
+                select ?, ?, ?, ?, ?, r.introle_id, 'A', 'test'
+                from app_role r where r.txtrole_code = ?
+                on conflict (intemployee_id) do nothing
+                """, employeeId, username, name, email, "Fac@123", role);
+        // Location only: every batch inside Kochi — 9001 — comes with it, while
+        // 9002 at Trivandrum stays out of reach.
+        jdbc.update("""
+                insert into app_user_location (intuser_id, txtlocation_id)
+                select intuser_id, 'KOC' from app_user where txtusername = ?
+                on conflict do nothing
+                """, username);
     }
 
     private String signIn(String employeeId, String password) throws Exception {
@@ -134,7 +170,11 @@ class PortalApiIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.accessToken").isNotEmpty())
                     .andExpect(jsonPath("$.user.role").value("superadmin"))
-                    .andExpect(jsonPath("$.user.permissions.length()").value(8));
+                    .andExpect(jsonPath("$.user.permissions.length()").value(9))
+                    // The two track permissions are separate, so a Super Admin
+                    // holds both and an endpoint can check either one.
+                    .andExpect(jsonPath("$.user.permissions").value(
+                            hasItems("lap-remedial.remedial-manage", "lap-remedial.lap-manage")));
         }
 
         @Test
@@ -499,7 +539,7 @@ class PortalApiIntegrationTest {
         }
 
         @Test
-        @DisplayName("asking for another batch is refused, not silently emptied")
+        @DisplayName("asking for a batch in another location is refused, not silently emptied")
         void anotherBatchIsRefused() throws Exception {
             mvc.perform(get("/api/assessments/trainees?batchId=9002")
                             .header("Authorization", bearer(facultyToken)))
@@ -520,9 +560,10 @@ class PortalApiIntegrationTest {
     class ScoringIsProtected {
 
         @Test
-        @DisplayName("faculty cannot score a trainee outside their batch, even knowing the id")
-        void cannotScoreOutsideTheirBatch() throws Exception {
-            // The knowledge that employee 70003 exists must not be enough.
+        @DisplayName("faculty cannot score a trainee in another location, even knowing the id")
+        void cannotScoreOutsideTheirLocation() throws Exception {
+            // The knowledge that employee 70003 exists must not be enough. 70003
+            // sits at Trivandrum; Kochi is the only location assigned.
             mvc.perform(patch("/api/assessments/trainees/70003")
                             .header("Authorization", bearer(facultyToken))
                             .contentType(MediaType.APPLICATION_JSON)
@@ -531,7 +572,7 @@ class PortalApiIntegrationTest {
         }
 
         @Test
-        @DisplayName("faculty can score their own trainee")
+        @DisplayName("faculty can score their own location's trainee")
         void canScoreTheirOwnTrainee() throws Exception {
             mvc.perform(patch("/api/assessments/trainees/70001")
                             .header("Authorization", bearer(facultyToken))
@@ -541,14 +582,157 @@ class PortalApiIntegrationTest {
         }
 
         @Test
+        @DisplayName("a faculty granted a track on their account carries it in the token")
+        void facultyCarriesTheirOwnGrant() throws Exception {
+            // The per-person grant has to reach the token, or ticking the box in
+            // User Management would appear to work and then not.
+            mvc.perform(post("/api/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"employeeId\":\"facultyrem\",\"password\":\"Fac@123\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.user.role").value("faculty"))
+                    .andExpect(jsonPath("$.user.permissions").value(hasItem("lap-remedial.remedial-manage")))
+                    .andExpect(jsonPath("$.user.permissions").value(not(hasItem("lap-remedial.lap-manage"))));
+        }
+
+        @Test
+        @DisplayName("an administrator can grant one track to a new faculty account")
+        void createsFacultyWithOneTrackPermission() throws Exception {
+            // The flow the client asked for: pick Faculty, tick one track.
+            mvc.perform(post("/api/users")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"employeeId":"70023","name":"Nisha Rao","role":"faculty",
+                                     "locationIds":["KOC"],
+                                     "trackPermissions":["lap-remedial.remedial-manage"]}
+                                    """))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.user.role").value("faculty"))
+                    .andExpect(jsonPath("$.user.permissions").value(hasItem("lap-remedial.remedial-manage")))
+                    .andExpect(jsonPath("$.user.permissions").value(not(hasItem("lap-remedial.lap-manage"))));
+        }
+
+        @Test
+        @DisplayName("a faculty can be granted both tracks")
+        void createsFacultyWithBothTrackPermissions() throws Exception {
+            mvc.perform(post("/api/users")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"employeeId":"70024","name":"Om Prakash","role":"faculty",
+                                     "locationIds":["KOC"],
+                                     "trackPermissions":["lap-remedial.remedial-manage",
+                                                        "lap-remedial.lap-manage"]}
+                                    """))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.user.permissions").value(
+                            hasItems("lap-remedial.remedial-manage", "lap-remedial.lap-manage")));
+        }
+
+        @Test
+        @DisplayName("a faculty grant cannot be used to hand out any other permission")
+        void refusesToGrantOtherPermissions() throws Exception {
+            // The boundary that matters: `trackPermissions` is not a way to grant
+            // users.manage to a faculty, and is refused rather than ignored.
+            mvc.perform(post("/api/users")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"employeeId":"70026","name":"Sneaky Iyer","role":"faculty",
+                                     "locationIds":["KOC"],
+                                     "trackPermissions":["users.manage"]}
+                                    """))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.fieldErrors[0].field").value("trackPermissions[0]"));
+        }
+
+        @Test
         @DisplayName("faculty cannot move a trainee onto a remedial track")
         void facultyCannotManageLapRemedial() throws Exception {
-            // Faculty hold lap-remedial.view but not lap-remedial.manage.
+            // The base faculty role holds lap-remedial.view but neither manage
+            // permission, so it can read the tracks and move nobody.
             mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
                             .header("Authorization", bearer(facultyToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"status\":\"remedial\",\"remark\":\"Needs support.\"}"))
                     .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("faculty cannot move a trainee onto LAP either")
+        void facultyCannotMoveToLap() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+                            .header("Authorization", bearer(facultyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"lap\",\"remark\":\"No improvement.\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("a Remedial-only faculty member can place a trainee on Remedial")
+        void remedialFacultyCanInitiateRemedial() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+                            .header("Authorization", bearer(remedialFacultyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"remedial\",\"remark\":\"Needs support.\"}"))
+                    .andExpect(status().isNoContent());
+        }
+
+        @Test
+        @DisplayName("a Remedial-only faculty member cannot place a trainee on LAP")
+        void remedialFacultyCannotInitiateLap() throws Exception {
+            // The point of the split: holding the Remedial permission must not
+            // carry over to the other track.
+            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+                            .header("Authorization", bearer(remedialFacultyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"lap\",\"remark\":\"No improvement.\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("a faculty member with both permissions can place a trainee on LAP")
+        void lapRemedialFacultyCanInitiateLap() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+                            .header("Authorization", bearer(lapRemedialFacultyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"lap\",\"remark\":\"No improvement.\"}"))
+                    .andExpect(status().isNoContent());
+        }
+
+        @Test
+        @DisplayName("closing a LAP track needs the LAP permission, not just Remedial's")
+        void remedialFacultyCannotCloseLap() throws Exception {
+            // Admin puts the trainee on LAP first, so the close is judged against
+            // the track they are actually on rather than the one in the body.
+            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+                            .header("Authorization", bearer(adminToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"lap\",\"remark\":\"No improvement.\"}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+                            .header("Authorization", bearer(remedialFacultyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"none\",\"remark\":\"Finished.\"}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("a Remedial-only faculty member can close their own Remedial track")
+        void remedialFacultyCanCloseRemedial() throws Exception {
+            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+                            .header("Authorization", bearer(remedialFacultyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"remedial\",\"remark\":\"Needs support.\"}"))
+                    .andExpect(status().isNoContent());
+
+            mvc.perform(patch("/api/assessments/trainees/70001/lap-remedial")
+                            .header("Authorization", bearer(remedialFacultyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"status\":\"none\",\"remark\":\"Support completed.\"}"))
+                    .andExpect(status().isNoContent());
         }
 
         @Test
@@ -817,17 +1001,19 @@ class PortalApiIntegrationTest {
         }
 
         @Test
-        @DisplayName("refuses a batch that is not inside the assigned locations")
-        void refusesBatchOutsideAssignedLocations() throws Exception {
-            mvc.perform(post("/api/users")
-                            .header("Authorization", bearer(adminToken))
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content("""
-                                    {"employeeId":"70012","name":"Mismatch","role":"faculty",
-                                     "locationIds":["KOC"],"batchIds":[9002]}
-                                    """))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.fieldErrors[0].field").value("batchIds"));
+        @DisplayName("a location assignment reaches every batch inside it")
+        void aLocationGrantsAllItsBatches() throws Exception {
+            // Batch-level access is gone, so a location-scoped faculty sees the
+            // whole location. 9002 sits at Trivandrum, a different location, and
+            // stays out of reach.
+            mvc.perform(get("/api/assessments/trainees?locationId=KOC")
+                            .header("Authorization", bearer(facultyToken)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items.length()").value(2));
+
+            mvc.perform(get("/api/assessments/trainees?batchId=9002")
+                            .header("Authorization", bearer(facultyToken)))
+                    .andExpect(status().isForbidden());
         }
 
         @Test
@@ -837,7 +1023,7 @@ class PortalApiIntegrationTest {
                             .header("Authorization", bearer(adminToken))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"employeeId\":\"70009\",\"name\":\"Copy\",\"role\":\"faculty\","
-                                    + "\"locationIds\":[\"KOC\"],\"batchIds\":[9001]}"))
+                                    + "\"locationIds\":[\"KOC\"]}"))
                     .andExpect(status().isConflict());
         }
 

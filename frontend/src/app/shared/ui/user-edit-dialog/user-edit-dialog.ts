@@ -2,13 +2,9 @@ import { Component, computed, inject, input, output, signal } from '@angular/cor
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { reiconCheck, reiconCloseCircle, reiconMinus, reiconUserEdit } from '@ng-icons/reicon';
 import {
-  BatchGroup,
-  batchesForLocations,
-  qualifiedBatchName,
-} from '../../../core/models/organization.model';
-import {
   Permission,
   PortalUser,
+  TRACK_PERMISSIONS,
   UserDraft,
   UserRole,
   UserStatus,
@@ -25,6 +21,8 @@ interface PermissionRow {
   label: string;
   description: string;
   granted: boolean;
+  /** Set on a track permission the chosen role already grants on its own. */
+  locked?: boolean;
 }
 
 /** Enough of an address to be a plausible mailbox — the API has the last word. */
@@ -33,9 +31,14 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /**
  * Add / edit dialog for a portal user.
  *
- * The role drives the rest of the form: it fixes the permission set (shown
- * read-only, since permissions are a property of the role and not of the
- * person) and decides whether the location and batch pickers apply at all.
+ * The role drives most of the form: it fixes the permission set and decides
+ * whether the location and batch pickers apply at all.
+ *
+ * <p>The two LAP / Remedial management permissions are the exception. They are
+ * not part of any role — a role cannot say that one faculty member owns Remedial
+ * and the next owns both — so they are chosen here, per person. Every faculty can
+ * still see the tracks; the boxes decide who may act on them.
+ *
  * Create the dialog per open (e.g. behind an `@if`) so each session starts from
  * the account being edited.
  */
@@ -108,8 +111,9 @@ export class UserEditDialogComponent {
       // New accounts start on the least access there is.
       role: edits.role ?? stored?.role ?? 'faculty',
       locationIds: edits.locationIds ?? stored?.locationIds ?? [],
-      batchIds: edits.batchIds ?? stored?.batchIds ?? [],
       status: edits.status ?? stored?.status ?? 'active',
+      // A new account manages no track until a box is ticked.
+      trackPermissions: edits.trackPermissions ?? stored?.trackPermissions ?? [],
     };
   });
 
@@ -123,37 +127,62 @@ export class UserEditDialogComponent {
   /** Whether the chosen role is assigned locations. */
   readonly showLocations = computed(() => this.role().requiresLocations);
 
-  /** Whether the chosen role is assigned batches. */
-  readonly showBatches = computed(() => this.role().requiresBatches);
-
-  /** Batches of the selected locations, labelled `Kochi · Batch 01`. */
-  readonly batchOptions = computed<MultiSelectOption[]>(() => {
-    // Depends on the loaded tree, so the choices appear when it does.
-    this.organization.locations();
-    return batchesForLocations(this.draft().locationIds).map((batch: BatchGroup) => ({
-      value: batch.id,
-      label: qualifiedBatchName(batch.id),
-    }));
+  /**
+   * Every permission that comes with the role, marked with whether it is granted.
+   *
+   * <p>The two track permissions are excluded: they are editable above, and
+   * listing them here as well would show the same permission twice with no way
+   * to tell which one is authoritative.
+   */
+  readonly rolePermissionRows = computed<PermissionRow[]>(() => {
+    const granted = this.role().permissions;
+    return this.users
+      .permissions()
+      .filter((permission) => !TRACK_PERMISSIONS.includes(permission.id))
+      .map((permission) => ({
+        ...permission,
+        granted: granted.includes(permission.id),
+      }));
   });
 
   /**
-   * What the batch picker says while there is nothing to pick from — a nudge
-   * that names the step that fixes it, wherever the dead end came from.
+   * The two track permissions as checkboxes, for a role that does not already
+   * grant them.
+   *
+   * <p>Hidden rather than disabled for the roles that hold both through their
+   * role: a box that is already on because of the role is not the
+   * administrator's to set, and offering it would let them tick something that
+   * would then be sent as a personal grant they never made.
    */
-  readonly batchHint = computed(() =>
-    this.draft().locationIds.length
-      ? 'The selected locations have no batches.'
-      : 'Select a location to choose its batches.',
+  readonly trackPermissionRows = computed<PermissionRow[]>(() => {
+    const roleHolds = this.role().permissions;
+    return TRACK_PERMISSIONS.map((id) => {
+      const definition = this.users.permissions().find((permission) => permission.id === id);
+      return {
+        id,
+        label: definition?.label ?? id,
+        description: definition?.description ?? '',
+        granted: (this.draft().trackPermissions ?? []).includes(id),
+        // Not the administrator's to choose when the role already grants it.
+        locked: roleHolds.includes(id),
+      };
+    });
+  });
+
+  /** Whether the track checkboxes are offered for the chosen role. */
+  readonly showTrackPermissions = computed(() =>
+    TRACK_PERMISSIONS.some((id) => !this.role().permissions.includes(id)),
   );
 
-  /** Every permission, marked with whether the chosen role grants it. */
-  readonly permissionRows = computed<PermissionRow[]>(() => {
-    const granted = this.role().permissions;
-    return this.users.permissions().map((permission) => ({
-      ...permission,
-      granted: granted.includes(permission.id),
-    }));
-  });
+  /** Ticks or unticks one track permission. */
+  onTrackPermissionToggle(id: Permission, checked: boolean): void {
+    const current = this.draft().trackPermissions ?? [];
+    this.patch({
+      trackPermissions: checked
+        ? [...current, id]
+        : current.filter((permission) => permission !== id),
+    });
+  }
 
   /**
    * Validation message for the Employee ID field, or `null` when it is fine.
@@ -191,22 +220,13 @@ export class UserEditDialogComponent {
     return 'Assign at least one location';
   });
 
-  /** Validation message for the batch picker, or `null` when it is fine. */
-  readonly batchError = computed<string | null>(() => {
-    if (!this.showBatches() || this.draft().batchIds.length) {
-      return null;
-    }
-    return 'Assign at least one batch';
-  });
-
   /** Whether every field holds something the account can be saved with. */
   readonly canSave = computed(
     () =>
       this.employeeIdError() === null &&
       this.nameError() === null &&
       this.emailError() === null &&
-      this.locationError() === null &&
-      this.batchError() === null,
+      this.locationError() === null,
   );
 
   onEmployeeIdInput(event: Event): void {
@@ -237,26 +257,13 @@ export class UserEditDialogComponent {
   }
 
   /**
-   * Applies a new location selection. Dropping a location also drops its
-   * batches, so the batch list never keeps a selection the user can no longer
-   * reach.
+   * Applies a new location selection.
+   *
+   * <p>Nothing cascades any more: the batches inside a location come with the
+   * location, so there is no second selection to keep in step with this one.
    */
   onLocationsChange(locationIds: readonly string[]): void {
-    const reachable = new Set(
-      batchesForLocations([...locationIds]).map((batch: BatchGroup) => batch.id),
-    );
-    this.patch({
-      locationIds: [...locationIds],
-      batchIds: this.draft().batchIds.filter((batchId) => reachable.has(batchId)),
-    });
-  }
-
-  /**
-   * Applies a new batch selection. The picker can only offer the batches of the
-   * chosen locations, so a value outside them cannot arrive here.
-   */
-  onBatchesChange(batchIds: readonly string[]): void {
-    this.patch({ batchIds: [...batchIds] });
+    this.patch({ locationIds: [...locationIds] });
   }
 
   onSave(): void {

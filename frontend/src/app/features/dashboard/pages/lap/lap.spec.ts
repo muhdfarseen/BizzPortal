@@ -18,7 +18,7 @@ describe('LapComponent', () => {
     }).compileComponents();
     http = TestBed.inject(HttpTestingController);
     harness = new TrackPageHarness<LapComponent>(http);
-    // Moving trainees needs `lap-remedial.manage`, and an `all`-scope role is
+    // Moving trainees needs the LAP manage permission, and an `all`-scope role is
     // what offers Q4 2025 and Bangalore / Batch 01 / LG Alpha in the filter bar.
     signInWith(http, TestBed.inject(AuthService), SIGN_IN.superadmin);
   });
@@ -40,52 +40,98 @@ describe('LapComponent', () => {
     expect(harness.searchButton(fixture).disabled).toBe(true);
   });
 
-  it('opens on the initiating tab and offers the two LAP views', async () => {
+  it('offers nothing to a faculty member who may not manage LAP', async () => {
+    // The Remedial-only faculty member: they may move Remedial, so the LAP page
+    // must offer them no Initiate button and no row actions. The two permissions
+    // are separate precisely so this screen comes out empty for them.
+    signInWith(http, TestBed.inject(AuthService), SIGN_IN.facultyRemedial);
     const fixture = createFixture();
-    await harness.searchBangalore(fixture, 'remedial');
+    await harness.searchBangalore(fixture, 'lap');
 
-    const tabs = Array.from(harness.host(fixture).querySelectorAll<HTMLButtonElement>('.track-tab'));
-    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual(['Initiate LAP', 'Current LAP']);
-    expect(tabs[0].getAttribute('aria-selected')).toBe('true');
-    expect(tabs[1].getAttribute('aria-selected')).toBe('false');
+    expect(harness.host(fixture).querySelector('.initiate-btn')).toBeNull();
+    expect(harness.actionLabels(fixture)).toEqual([]);
   });
 
-  it('lists the trainees on Remedial on Initiate LAP, ready to be moved', async () => {
+  it('offers Close LAP to a faculty member who may manage both tracks', async () => {
+    signInWith(http, TestBed.inject(AuthService), SIGN_IN.facultyLapRemedial);
     const fixture = createFixture();
-    // Initiate LAP draws from the Remedial track, which is how a LAP starts.
-    await harness.searchBangalore(fixture, 'remedial');
-
-    expect(harness.actionLabels(fixture)).toEqual(['Initiate LAP']);
-    // The pool carries the Remedial track it is on, so the columns are present.
-    expect(harness.headerLabels(fixture)).toContain('Start Date');
-    expect(harness.headerLabels(fixture)).toContain('Remark');
-  });
-
-  it('lists the trainees on LAP on Current LAP, with only Close LAP offered', async () => {
-    const fixture = createFixture();
-    await harness.searchBangalore(fixture, 'remedial');
-
-    harness.openTab(fixture, 'Current LAP', 'lap');
+    await harness.searchBangalore(fixture, 'lap');
 
     expect(harness.actionLabels(fixture)).toEqual(['Close LAP']);
+  });
+
+  it('opens on the trainees on LAP, with an Initiate LAP button', async () => {
+    const fixture = createFixture();
+    await harness.searchBangalore(fixture, 'lap');
+
+    expect(harness.heading(fixture)).toBe('LAP');
+    // No sub-tabs and no track dropdown: the page is for LAP, so it shows LAP.
+    expect(harness.host(fixture).querySelector('.track-tabs')).toBeNull();
+    expect(harness.host(fixture).querySelector('.initiate-btn')?.textContent?.trim()).toBe(
+      'Initiate LAP',
+    );
+  });
+
+  it('lists the trainees on LAP, with only Close LAP offered', async () => {
+    const fixture = createFixture();
+    await harness.searchBangalore(fixture, 'lap');
+
+    expect(harness.actionLabels(fixture)).toEqual(['Close LAP']);
+    // The column names its track, so a date read here is never mistaken for the
+    // Remedial date the same trainee has further down their history.
     expect(harness.headerLabels(fixture)).toEqual([
       'Emp ID',
       'Name',
       'Pre Assessment',
       'Mid Assessment',
       'Post Assessment',
-      'Start Date',
+      'LAP Start Date',
       'Remark',
       'Action',
     ]);
+  });
+
+  it('lists the trainees on Remedial once Initiate LAP is clicked', async () => {
+    const fixture = createFixture();
+    // Initiate LAP draws from the Remedial track, which is how a LAP starts.
+    await harness.searchBangalore(fixture, 'lap');
+
+    harness.startInitiate(fixture, 'remedial');
+
+    expect(harness.heading(fixture)).toBe('Initiate LAP');
+    expect(harness.actionLabels(fixture)).toEqual(['Initiate LAP']);
+    // The pool's dates are the Remedial ones, so the column says so — a bare
+    // "Start Date" here would read as a LAP date on a LAP page.
+    expect(harness.headerLabels(fixture)).toContain('Remedial Start Date');
+    expect(harness.headerLabels(fixture)).toContain('Remark');
+  });
+
+  it('returns to the trainees on LAP from Initiate, on a secondary Back button', async () => {
+    const fixture = createFixture();
+    await harness.searchBangalore(fixture, 'lap');
+
+    harness.startInitiate(fixture, 'remedial');
+    expect(harness.heading(fixture)).toBe('Initiate LAP');
+    // Coming back is not the page's action, so it is offered as a secondary,
+    // marked by its arrow rather than by naming the track it returns to.
+    const back = harness.host(fixture).querySelector('.initiate-btn');
+    expect(back?.classList.contains('is-secondary')).toBe(true);
+    expect(back?.textContent?.trim()).toBe('Back');
+    expect(back?.querySelector('ng-icon')).not.toBeNull();
+
+    harness.cancelInitiate(fixture, 'lap');
+
+    expect(harness.heading(fixture)).toBe('LAP');
+    expect(harness.actionLabels(fixture)).toEqual(['Close LAP']);
   });
 
   it('initiates LAP for a trainee, carrying the remark given', async () => {
     harness.server = untrackedServer();
     harness.seedTrack('remedial');
     const fixture = createFixture();
-    // Initiate LAP draws from the Remedial track, which is how a LAP starts.
-    await harness.searchBangalore(fixture, 'remedial');
+    await harness.searchBangalore(fixture, 'lap');
+
+    harness.startInitiate(fixture, 'remedial');
 
     harness.host(fixture).querySelector<HTMLButtonElement>('.row-action-text')?.click();
     fixture.detectChanges();
@@ -99,7 +145,7 @@ describe('LapComponent', () => {
     // The trainee has left Remedial…
     expect(harness.toastMessages()).toContain('LAP initiated');
 
-    harness.openTab(fixture, 'Current LAP', 'lap');
+    harness.cancelInitiate(fixture, 'lap');
 
     // …and arrived on LAP with the remark given at the move.
     expect(harness.host(fixture).querySelector('tbody tr .td-remark')?.textContent?.trim()).toBe(
@@ -115,9 +161,7 @@ describe('LapComponent', () => {
     harness.server = untrackedServer();
     harness.seedTrack('lap');
     const fixture = createFixture();
-    await harness.searchBangalore(fixture, 'remedial');
-
-    harness.openTab(fixture, 'Current LAP', 'lap');
+    await harness.searchBangalore(fixture, 'lap');
 
     harness.host(fixture).querySelector<HTMLButtonElement>('.row-action-text')?.click();
     fixture.detectChanges();
@@ -135,7 +179,9 @@ describe('LapComponent', () => {
   it('says so plainly when there is nobody on Remedial to place on LAP', async () => {
     harness.server = untrackedServer();
     const fixture = createFixture();
-    await harness.searchBangalore(fixture, 'remedial');
+    await harness.searchBangalore(fixture, 'lap');
+
+    harness.startInitiate(fixture, 'remedial');
 
     expect(harness.host(fixture).querySelector('.empty-state')?.textContent).toContain(
       'No trainees are on Remedial',

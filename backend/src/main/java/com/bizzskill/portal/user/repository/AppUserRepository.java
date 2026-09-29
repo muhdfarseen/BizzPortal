@@ -18,26 +18,26 @@ public interface AppUserRepository
      * Looks an account up for sign-in.
      *
      * <p>The role is fetched with the account because the token's authorities are
-     * built from it; the permission set is then loaded within the same
-     * transaction by the authentication service.
+     * built from it, and so are the account's own grants — a permission given to
+     * one person rather than their role. Without both, the authorities would be
+     * read from a detached collection once the transaction closed.
      */
-    @EntityGraph(attributePaths = "role")
+    @EntityGraph(attributePaths = {"role", "extraPermissions"})
     Optional<AppUser> findByTxtUsernameIgnoreCase(String username);
 
-    @EntityGraph(attributePaths = "role")
+    @EntityGraph(attributePaths = {"role", "extraPermissions"})
     Optional<AppUser> findByIntEmployeeId(Long intEmployeeId);
 
     /**
      * The accounts named, with everything the user-management screen renders.
      *
      * <p>The second half of a paged read. Assembling a page in one query would mean
-     * joining {@code locationIds} and {@code batchIds}, which are element
-     * collections — and Hibernate cannot apply a row limit across a collection join,
-     * so it silently loads the whole table and pages in memory. Paging the accounts
-     * first and fetching their collections for just that page keeps the limit in the
-     * database, which is the entire point.
+     * joining {@code locationIds}, an element collection — and Hibernate cannot apply
+     * a row limit across a collection join, so it silently loads the whole table and
+     * pages in memory. Paging the accounts first and fetching their assignments for
+     * just that page keeps the limit in the database, which is the entire point.
      */
-    @EntityGraph(attributePaths = {"role", "locationIds", "batchIds"})
+    @EntityGraph(attributePaths = {"role", "locationIds", "extraPermissions"})
     List<AppUser> findByIntUserIdIn(Collection<Long> intUserIds);
 
     boolean existsByTxtUsernameIgnoreCase(String username);

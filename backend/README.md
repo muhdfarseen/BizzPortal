@@ -142,10 +142,12 @@ create, since those tables exist) and V2+ are applied.
   @PreAuthorize("hasAuthority('assessments.edit')")
   ```
   Granting a permission to a role is a data change, not a deployment.
-- **Scope is enforced in queries, not the UI.** A role's `scope` narrows every
-  read: `all`, `assigned-locations` or `assigned-batches`. Hiding rows in the
+- **Scope is enforced in queries, not in UI.** A role's `scope` narrows every
+  read: `all` or `assigned-locations`. Hiding rows in the
   browser is not access control, so `OrganizationService` filters by the caller's
-  assignments in the query itself.
+  assignments in the query itself. Access is granted per location only — a
+  location assignment brings every batch and learning group inside it, so there is
+  no way to see part of a place you have access to.
 - **Tokens are snapshots.** A permission or assignment change takes effect at the
   user's next sign-in. That is the accepted trade-off of the stateless design;
   the alternatives are short-lived tokens with a refresh flow, or revocation
@@ -155,10 +157,21 @@ Four roles ship as reference data, mirroring the frontend:
 
 | Role | Scope | Permissions |
 |---|---|---|
-| `superadmin` | all | all 8 |
+| `superadmin` | all | all 9 |
 | `program-manager` | all | all but `users.manage`, `configuration.manage` |
 | `location-admin` | assigned-locations | as above |
-| `faculty` | assigned-batches | as above, minus `lap-remedial.manage` |
+| `faculty` | assigned-locations | as above, minus both track-manage permissions (view only) |
+
+LAP and Remedial are managed under separate permissions, and unlike everything
+else they are granted **per person**, not per role. A role cannot say that this
+faculty member owns Remedial and the next owns both tracks, so
+`app_user_permission` carries the two codes against the account, chosen in User
+Management. The grants are additive: they add to the role and never subtract from
+it, so a grant can never quietly reduce someone's access.
+
+Effective permissions are always the union of the two, computed in one place
+(`AppUser.effectivePermissionCodes()`) and used by both the token and the API, so
+the client can never offer an action the server would refuse.
 
 ---
 
@@ -253,6 +266,11 @@ quarter's batches rather than every batch the caller can see.
 | `GET` | `/api/users/permissions` | `users.manage` |
 | `POST` | `/api/users` | `users.manage` |
 | `PATCH` | `/api/users/{employeeId}` | `users.manage` |
+
+Both user endpoints accept `trackPermissions`, a list of the two track codes to
+grant that account. Only those two are accepted; any other code is refused with a
+400 rather than ignored, so the field cannot be used to hand out a permission the
+caller was not authorised to distribute.
 | `DELETE` | `/api/users/{employeeId}` | `users.manage` |
 
 `POST /api/users` returns a `temporaryPassword` **once**, and only when the request
@@ -264,9 +282,15 @@ did not supply one. No other response has a field for it.
 |---|---|---|
 | `GET` | `/api/assessments/trainees` | `assessments.view` |
 | `PATCH` | `/api/assessments/trainees/{employeeId}` | `assessments.edit` |
-| `PATCH` | `/api/assessments/trainees/{employeeId}/lap-remedial` | `lap-remedial.manage` |
+| `PATCH` | `/api/assessments/trainees/{employeeId}/lap-remedial` | `lap-remedial.view`, then per track in the service |
 | `GET` | `/api/assessments/uploads/template` | `assessments.view` |
 | `POST` | `/api/assessments/uploads` | `assessments.edit` |
+
+The track endpoint is guarded on `lap-remedial.view` and then checked per track
+in `LapRemedialService`, because the two tracks are granted separately: a single
+`hasAuthority` on the endpoint could not tell a Remedial placement from a LAP one.
+A close is judged against the track the trainee is currently on, so closing LAP
+needs the LAP permission even though the body only says `none`.
 
 Filter the roster with `?locationId=`, `?batchId=` and `?lgId=`; each narrows
 further than the last. Score entry accepts a map keyed by assessment id, so a

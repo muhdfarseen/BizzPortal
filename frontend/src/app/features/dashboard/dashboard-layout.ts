@@ -141,9 +141,9 @@ export class DashboardLayoutComponent {
   /** Whether the role reaches only part of the organisation. */
   readonly isScoped = computed(() => this.auth.scope() !== 'all');
 
-  /** The locations or batches the session is assigned to, as one line. */
+  /** The locations the session is assigned to, as one line. */
   readonly assignedAccess = computed(() =>
-    scopeSummary(this.auth.role(), this.auth.assignedLocationIds(), this.auth.assignedBatchIds()),
+    scopeSummary(this.auth.role(), this.auth.assignedLocationIds()),
   );
 
   constructor(

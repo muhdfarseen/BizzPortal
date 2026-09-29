@@ -45,10 +45,8 @@ public class TokenService {
     public static final String CLAIM_SCOPE = "scope";
     /** Claim holding the permission codes. */
     public static final String CLAIM_PERMISSIONS = "permissions";
-    /** Claim holding the assigned location ids. */
+    /** Claim holding the assigned location ids; every batch inside them comes too. */
     public static final String CLAIM_LOCATIONS = "locations";
-    /** Claim holding the assigned batch ids. */
-    public static final String CLAIM_BATCHES = "batches";
 
     private final JwtEncoder encoder;
     private final JwtProperties properties;
@@ -61,17 +59,18 @@ public class TokenService {
     /**
      * Mints an access token for an account.
      *
-     * <p>The caller must have loaded the role with its permissions; the user
-     * repository does that with an entity graph precisely so this method can
-     * build the authority list without another query.
+     * <p>The caller must have loaded the role with its permissions and the
+     * account's own grants; the user repository does that with an entity graph
+     * precisely so this method can build the authority list without another
+     * query. The two are combined by {@link AppUser#effectivePermissionCodes()},
+     * so a permission granted to one person rather than their role still reaches
+     * the token.
      */
     public IssuedToken issue(AppUser user) {
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plus(properties.ttl());
 
-        Set<String> permissions = user.getRole().getPermissions().stream()
-                .map(AppPermission::getTxtPermissionCode)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> permissions = user.effectivePermissionCodes();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(properties.issuer())
@@ -84,7 +83,6 @@ public class TokenService {
                 .claim(CLAIM_SCOPE, user.getRole().getTxtScope().getCode())
                 .claim(CLAIM_PERMISSIONS, List.copyOf(permissions))
                 .claim(CLAIM_LOCATIONS, List.copyOf(user.getLocationIds()))
-                .claim(CLAIM_BATCHES, List.copyOf(user.getBatchIds()))
                 .build();
 
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
@@ -102,8 +100,7 @@ public class TokenService {
                 jwt.getClaim(CLAIM_ROLE),
                 RoleScope.fromCode(jwt.getClaimAsString(CLAIM_SCOPE)),
                 stringSet(jwt.getClaim(CLAIM_PERMISSIONS)),
-                stringSet(jwt.getClaim(CLAIM_LOCATIONS)),
-                longSet(jwt.getClaim(CLAIM_BATCHES)));
+                stringSet(jwt.getClaim(CLAIM_LOCATIONS)));
     }
 
     @SuppressWarnings("unchecked")

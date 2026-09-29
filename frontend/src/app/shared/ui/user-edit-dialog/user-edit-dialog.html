@@ -129,38 +129,51 @@
         </section>
       }
 
-      <!-- ── Assigned batches ───────────────────────────────── -->
-      @if (showBatches()) {
+      <!-- ── Track permissions (per person, not from the role) ── -->
+      @if (showTrackPermissions()) {
         <section class="form-section">
-          <h3 class="section-title">Assigned batches</h3>
-          <div class="field">
-            <app-multi-select
-              [options]="batchOptions()"
-              [selected]="draft().batchIds"
-              [searchable]="true"
-              [disabled]="batchOptions().length === 0"
-              placeholder="Select batches"
-              emptyMessage="No batches for the selected locations."
-              ariaLabel="Assigned batches"
-              (selectedChange)="onBatchesChange($event)"
-            />
-            @if (batchOptions().length === 0) {
-              <span class="field-hint">{{ batchHint() }}</span>
-            } @else if (batchError(); as error) {
-              <span class="field-error">{{ error }}</span>
+          <h3 class="section-title">LAP / Remedial management</h3>
+          <p class="section-note">
+            Everyone with this role can see every batch in the assigned locations, and can
+            read the LAP and Remedial lists. Tick the tracks this person may initiate and
+            close — one, the other, or both.
+          </p>
+          <ul class="track-permission-list">
+            @for (track of trackPermissionRows(); track track.id) {
+              <li class="track-permission-row">
+                <label class="track-permission">
+                  <input
+                    class="track-permission-input"
+                    type="checkbox"
+                    [checked]="track.granted"
+                    [disabled]="track.locked"
+                    [attr.data-permission]="track.id"
+                    (change)="onTrackPermissionToggle(track.id, $any($event.target).checked)"
+                  />
+                  <span class="track-permission-text">
+                    <span class="track-permission-label">
+                      {{ track.label }}
+                      @if (track.locked) {
+                        <span class="track-permission-note">included with the role</span>
+                      }
+                    </span>
+                    <span class="track-permission-desc">{{ track.description }}</span>
+                  </span>
+                </label>
+              </li>
             }
-          </div>
+          </ul>
         </section>
       }
 
-      <!-- ── Permissions (read-only: they come with the role) ── -->
+      <!-- ── Permissions (read-only: the rest come with the role) ── -->
       <section class="form-section">
         <h3 class="section-title">Permissions</h3>
         <p class="section-note">
-          Permissions come with the role — pick a different role to change them.
+          The rest of the permissions come with the role — pick a different role to change them.
         </p>
         <ul class="permission-list">
-          @for (permission of permissionRows(); track permission.id) {
+          @for (permission of rolePermissionRows(); track permission.id) {
             <li class="permission-row" [class.is-granted]="permission.granted">
               <span class="permission-mark" aria-hidden="true">
                 <ng-icon [name]="permission.granted ? 'reiconCheck' : 'reiconMinus'" size="14" />

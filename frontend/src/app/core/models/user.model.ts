@@ -7,7 +7,7 @@
  * checking `has(permission)` plus `canAccessLocation(id)` is always enough.
  */
 
-import { batchesForLocations, locationName, qualifiedBatchName } from './organization.model';
+import { locationName } from './organization.model';
 
 /** The portal's role hierarchy, highest access first. */
 export type UserRole = 'superadmin' | 'program-manager' | 'location-admin' | 'faculty';
@@ -18,7 +18,10 @@ export type Permission =
   | 'assessments.view'
   | 'assessments.edit'
   | 'lap-remedial.view'
-  | 'lap-remedial.manage'
+  /** Initiate Remedial, and close a Remedial track that has finished. */
+  | 'lap-remedial.remedial-manage'
+  /** Initiate LAP, and close a LAP track that has finished. */
+  | 'lap-remedial.lap-manage'
   | 'reports.view'
   | 'users.manage'
   | 'configuration.manage';
@@ -27,10 +30,14 @@ export type Permission =
 export type RoleScope =
   /** Every location and batch — no assignment needed. */
   | 'all'
-  /** Only the locations assigned to the user. */
-  | 'assigned-locations'
-  /** Only the batches assigned to the user, within their locations. */
-  | 'assigned-batches';
+  /**
+   * Only the locations assigned to the user, and every batch and learning group
+   * inside them.
+   *
+   * <p>There is no batch-level scope: a location assignment means the whole
+   * location, so nobody sees part of a place they have been given access to.
+   */
+  | 'assigned-locations';
 
 /** Whether a user account is usable. */
 export type UserStatus = 'active' | 'inactive';
@@ -65,9 +72,14 @@ export const PERMISSIONS: PermissionDefinition[] = [
     description: 'See which trainees are on a LAP or Remedial track',
   },
   {
-    id: 'lap-remedial.manage',
-    label: 'Manage LAP / Remedial',
-    description: 'Move trainees onto a track and close the tracks they complete',
+    id: 'lap-remedial.remedial-manage',
+    label: 'Manage Remedial',
+    description: 'Initiate Remedial for trainees and close completed Remedial tracks',
+  },
+  {
+    id: 'lap-remedial.lap-manage',
+    label: 'Manage LAP',
+    description: 'Initiate LAP for trainees and close completed LAP tracks',
   },
   {
     id: 'reports.view',
@@ -94,8 +106,6 @@ export interface RoleDefinition {
   scope: RoleScope;
   /** Whether users of this role must be assigned one or more locations. */
   requiresLocations: boolean;
-  /** Whether users of this role must be assigned one or more batches. */
-  requiresBatches: boolean;
   permissions: readonly Permission[];
 }
 
@@ -111,7 +121,26 @@ const NON_ADMIN_PERMISSIONS: readonly Permission[] = ALL_PERMISSIONS.filter(
   (permission) => permission !== 'users.manage' && permission !== 'configuration.manage',
 );
 
-/** The four roles, ordered from most to least access. */
+/**
+ * What the faculty role grants out of the box: record results, read the tracks
+ * and the reports, reach only the assigned batches.
+ *
+ * <p>It grants no track management. The two track permissions are granted per
+ * person in User Management, so two faculty members on the same role can own
+ * different tracks — a role alone cannot say which of them may move LAP.
+ *
+ * <p>It reaches the assigned locations and every batch inside them: there is no
+ * batch-level access to configure.
+ */
+const FACULTY_PERMISSIONS: readonly Permission[] = [
+  'dashboard.view',
+  'assessments.view',
+  'assessments.edit',
+  'lap-remedial.view',
+  'reports.view',
+];
+
+/** The roles, ordered from most to least access. */
 export const ROLES: RoleDefinition[] = [
   {
     id: 'superadmin',
@@ -119,7 +148,6 @@ export const ROLES: RoleDefinition[] = [
     description: 'Full access to every location, plus user management and exam configuration.',
     scope: 'all',
     requiresLocations: false,
-    requiresBatches: false,
     permissions: ALL_PERMISSIONS,
   },
   {
@@ -128,7 +156,6 @@ export const ROLES: RoleDefinition[] = [
     description: 'Access to the data of every location. Cannot manage users or exam configuration.',
     scope: 'all',
     requiresLocations: false,
-    requiresBatches: false,
     permissions: NON_ADMIN_PERMISSIONS,
   },
   {
@@ -137,17 +164,16 @@ export const ROLES: RoleDefinition[] = [
     description: 'Access to the data of the assigned locations only.',
     scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: false,
     permissions: NON_ADMIN_PERMISSIONS,
   },
   {
     id: 'faculty',
     label: 'Faculty',
-    description: 'Access to the assigned batches only. Records results but cannot manage tracks.',
-    scope: 'assigned-batches',
+    description:
+      'Access to the assigned locations only, and every batch inside them. Records results and can see the tracks. Which tracks they may initiate and close is set per person, below the role.',
+    scope: 'assigned-locations',
     requiresLocations: true,
-    requiresBatches: true,
-    permissions: NON_ADMIN_PERMISSIONS.filter((permission) => permission !== 'lap-remedial.manage'),
+    permissions: FACULTY_PERMISSIONS,
   },
 ];
 
@@ -161,10 +187,8 @@ export interface PortalUser {
   email: string;
   /** The role the account's permissions come from. */
   role: UserRole;
-  /** Locations the user may reach; empty for `all`-scope roles. */
+  /** Locations the user may reach, and every batch inside them. */
   locationIds: string[];
-  /** Batches the user may reach; empty unless the role is scoped to batches. */
-  batchIds: string[];
   status: UserStatus;
   /** ISO date (`yyyy-MM-dd`) the account was created. */
   createdAt: string;
@@ -176,14 +200,34 @@ export interface PortalUser {
   scope?: RoleScope;
   /** Whether the role must be assigned locations. */
   requiresLocations?: boolean;
-  /** Whether the role must be assigned batches. */
-  requiresBatches?: boolean;
   /** The permissions the role grants, as the API reports them. */
   permissions?: readonly Permission[];
+  /**
+   * The track permissions granted to this person over and above their role's.
+   *
+   * <p>Separate from {@link permissions}, which is the union of the role's and
+   * these: the form must edit what was granted to *this* account, and a role
+   * that already grants a permission must not make it look individually chosen.
+   */
+  trackPermissions?: readonly Permission[];
 }
 
 /** The fields of a user an admin edits; the employee id is the account's key. */
 export type UserDraft = Omit<PortalUser, 'createdAt'>;
+
+/**
+ * The track permissions an administrator picks per person, in the order they are
+ * offered. The other permissions come with the role and are not offered here.
+ */
+export const TRACK_PERMISSIONS: readonly Permission[] = [
+  'lap-remedial.remedial-manage',
+  'lap-remedial.lap-manage',
+];
+
+/** Whether the permission is one of the per-person track grants. */
+export function isTrackPermission(permission: Permission): boolean {
+  return TRACK_PERMISSIONS.includes(permission);
+}
 
 /** The definition of a role, falling back to Faculty (the least access). */
 export function roleDefinition(role: UserRole): RoleDefinition {
@@ -208,50 +252,34 @@ export function permissionDefinitionsForRole(role: UserRole): PermissionDefiniti
 
 /**
  * Drops assignments the role does not use, so an account that was demoted (or
- * promoted) never keeps stale access: `all`-scope roles store no assignments,
- * location-scoped roles store no batches, and batches outside the assigned
- * locations are removed.
+ * promoted) never keeps stale access: `all`-scope roles store no assignments.
+ *
+ * <p>Locations are the only assignment left. A batch is reachable exactly when
+ * its location is assigned, so there is nothing batch-level to normalise.
  */
 export function normalizeAssignments(
   role: UserRole,
   locationIds: readonly string[],
-  batchIds: readonly string[],
-): { locationIds: string[]; batchIds: string[] } {
+): { locationIds: string[] } {
   const definition = roleDefinition(role);
 
   if (!definition.requiresLocations) {
-    return { locationIds: [], batchIds: [] };
+    return { locationIds: [] };
   }
 
-  const locations = [...new Set(locationIds)];
-  if (!definition.requiresBatches) {
-    return { locationIds: locations, batchIds: [] };
-  }
-
-  const allowed = new Set(batchesForLocations(locations).map((batch) => batch.id));
-  return {
-    locationIds: locations,
-    batchIds: [...new Set(batchIds)].filter((batchId) => allowed.has(batchId)),
-  };
+  return { locationIds: [...new Set(locationIds)] };
 }
 
 /**
  * One line describing what a role plus its assignments can reach, e.g.
- * `All locations`, `Kochi, Chennai` or `Kochi · Batch 01`.
+ * `All locations` or `Kochi, Chennai`. The whole of each named location is
+ * included, so there is no batch to qualify.
  */
-export function scopeSummary(
-  role: UserRole,
-  locationIds: readonly string[],
-  batchIds: readonly string[],
-): string {
+export function scopeSummary(role: UserRole, locationIds: readonly string[]): string {
   const definition = roleDefinition(role);
 
   if (definition.scope === 'all') {
     return 'All locations';
-  }
-
-  if (definition.requiresBatches) {
-    return batchIds.length ? batchIds.map(qualifiedBatchName).join(', ') : 'No batches';
   }
 
   return locationIds.length ? locationIds.map(locationName).join(', ') : 'No locations';
@@ -259,7 +287,7 @@ export function scopeSummary(
 
 /** One line describing what a user can reach, shown in the user table. */
 export function accessSummary(user: PortalUser): string {
-  return scopeSummary(user.role, user.locationIds, user.batchIds);
+  return scopeSummary(user.role, user.locationIds);
 }
 
 /* ── Loading the matrix from the API ───────────────────────── */
@@ -274,10 +302,8 @@ export interface ApiPortalUser {
   roleName?: string;
   scope?: string;
   requiresLocations?: boolean;
-  requiresBatches?: boolean;
+  /** Locations assigned; every batch inside them is reachable. */
   locationIds?: readonly string[];
-  /** The API sends batch ids as numbers; every id is an opaque string here. */
-  batchIds?: readonly (number | string)[];
   permissions?: readonly string[];
   status?: string;
   createdAt?: string;
@@ -298,15 +324,19 @@ export function toPortalUser(api: ApiPortalUser): PortalUser {
     email: api.email,
     role: api.role as UserRole,
     locationIds: [...(api.locationIds ?? [])],
-    batchIds: (api.batchIds ?? []).map((batchId) => String(batchId)),
     status: api.status === 'inactive' ? 'inactive' : 'active',
     createdAt: toIsoDate(api.createdAt),
     username: api.username,
     roleName: api.roleName,
     scope: api.scope as RoleScope | undefined,
     requiresLocations: api.requiresLocations,
-    requiresBatches: api.requiresBatches,
-    permissions: (api.permissions ?? []) as readonly Permission[],
+        permissions: (api.permissions ?? []) as readonly Permission[],
+    // The API reports the union; the form needs to know which of the two track
+    // permissions came from the role and which were granted to this person, so a
+    // permission the role already gives is not presented as a personal choice.
+    trackPermissions: ((api.permissions ?? []) as readonly Permission[]).filter(
+      isTrackPermission,
+    ),
   };
 }
 
@@ -325,8 +355,7 @@ export interface ApiRoleDefinition {
   description: string;
   scope: string;
   requiresLocations: boolean;
-  requiresBatches: boolean;
-  permissions: readonly string[];
+    permissions: readonly string[];
 }
 
 /** A permission as `GET /api/users/permissions` returns it. */
@@ -352,7 +381,6 @@ export function setRoleDefinitions(roles: readonly ApiRoleDefinition[]): void {
     description: role.description,
     scope: role.scope as RoleScope,
     requiresLocations: role.requiresLocations,
-    requiresBatches: role.requiresBatches,
     permissions: [...role.permissions] as readonly Permission[],
   }));
   ROLES.splice(0, ROLES.length, ...mapped);

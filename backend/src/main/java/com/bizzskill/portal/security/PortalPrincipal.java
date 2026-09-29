@@ -17,8 +17,8 @@ import java.util.Set;
  * @param roleCode    the role's code, e.g. {@code location-admin}.
  * @param scope       how far the caller's permissions reach.
  * @param permissions permission codes, e.g. {@code assessments.edit}.
- * @param locationIds locations the caller may see; empty means all of them.
- * @param batchIds    batches the caller may see; empty means all in scope.
+ * @param locationIds locations the caller may see; empty means all of them, and
+ *                   every batch inside them comes with it.
  */
 public record PortalPrincipal(
         String username,
@@ -27,8 +27,7 @@ public record PortalPrincipal(
         String roleCode,
         RoleScope scope,
         Set<String> permissions,
-        Set<String> locationIds,
-        Set<Long> batchIds) {
+        Set<String> locationIds) {
 
     /** Whether the caller holds this permission code. */
     public boolean has(String permission) {
@@ -42,10 +41,6 @@ public record PortalPrincipal(
      * the same wherever it appears.
      */
     public boolean isLocationRestricted() {
-        return scope == RoleScope.ASSIGNED_LOCATIONS || scope == RoleScope.ASSIGNED_BATCHES;
-    }
-
-    public boolean isBatchRestricted() {
-        return scope == RoleScope.ASSIGNED_BATCHES;
+        return scope == RoleScope.ASSIGNED_LOCATIONS;
     }
 }

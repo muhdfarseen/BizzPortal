@@ -4,7 +4,6 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
-
 import java.util.List;
 
 /**
@@ -33,8 +32,19 @@ public record UserUpdateRequest(
 
         List<String> locationIds,
 
-        List<Long> batchIds,
-
         @Pattern(regexp = "active|inactive", message = "Choose active or inactive.")
-        String status) {
+        String status,
+
+        /**
+         * Track permissions to grant this person, over and above their role's —
+         * the whole set, so unticking a box revokes it. Null leaves the current
+         * grants alone, which is what a caller that never sends the field means.
+         *
+         * <p>Validated per element: {@code @Pattern} does not apply to a list, so
+         * the constraint has to sit on the type argument.
+         */
+        List<@Pattern(
+                regexp = "lap-remedial\\.remedial-manage|lap-remedial\\.lap-manage",
+                message = "Choose only the LAP and Remedial management permissions.") String>
+        trackPermissions) {
 }

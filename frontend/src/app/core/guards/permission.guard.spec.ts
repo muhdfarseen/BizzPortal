@@ -29,6 +29,15 @@ const SIGN_IN_BY_ROLE: Record<UserRole, string> = {
   faculty: SIGN_IN.faculty,
 };
 
+/**
+ * Accounts that differ only in the track permissions granted to them directly,
+ * for the guards that key on those.
+ */
+const GRANTED = {
+  remedial: SIGN_IN.facultyRemedial,
+  both: SIGN_IN.facultyLapRemedial,
+};
+
 const ROLES = Object.keys(SIGN_IN_BY_ROLE) as UserRole[];
 
 describe('permissionGuard', () => {
@@ -74,12 +83,37 @@ describe('permissionGuard', () => {
     expect(admittedBy('configuration.manage')).toEqual(['superadmin']);
   });
 
-  it('keeps moving LAP / Remedial tracks away from Faculty', () => {
-    expect(admittedBy('lap-remedial.manage')).toEqual([
+  it('keeps moving LAP tracks away from a faculty granted only Remedial', () => {
+    expect(admittedBy('lap-remedial.lap-manage')).toEqual([
       'superadmin',
       'program-manager',
       'location-admin',
     ]);
+  });
+
+  it('admits a faculty granted Remedial on their account, but not LAP', () => {
+    // The per-person grant: the account is an ordinary faculty member whose only
+    // difference is the Remedial box that was ticked for them.
+    signInWith(http, auth, GRANTED.remedial);
+    expect(canActivate('lap-remedial.remedial-manage')).toBe(true);
+    expect(canActivate('lap-remedial.lap-manage')).toBeInstanceOf(UrlTree);
+  });
+
+  it('admits a faculty granted both tracks on their account', () => {
+    signInWith(http, auth, GRANTED.both);
+    expect(canActivate('lap-remedial.remedial-manage')).toBe(true);
+    expect(canActivate('lap-remedial.lap-manage')).toBe(true);
+  });
+
+  it('still lets every faculty read the tracks, granted or not', () => {
+    expect(admittedBy('lap-remedial.view')).toEqual([
+      'superadmin',
+      'program-manager',
+      'location-admin',
+      'faculty',
+    ]);
+    signInWith(http, auth, GRANTED.both);
+    expect(canActivate('lap-remedial.view')).toBe(true);
   });
 
   it('turns a denied role back to the dashboard home it always has', () => {

@@ -78,11 +78,19 @@ describe('AuthService', () => {
       expect(withUsers).toEqual(['superadmin']);
     });
 
-    it('never gives Faculty the ability to move LAP / Remedial tracks', () => {
-      expect(permissionsForRole('faculty')).not.toContain('lap-remedial.manage');
+    it('never gives the faculty role the ability to move either track', () => {
+      // Both are granted per person, so the role itself carries neither.
+      expect(permissionsForRole('faculty')).not.toContain('lap-remedial.remedial-manage');
+      expect(permissionsForRole('faculty')).not.toContain('lap-remedial.lap-manage');
       expect(permissionsForRole('faculty')).toContain('lap-remedial.view');
       expect(permissionsForRole('faculty')).toContain('assessments.edit');
-      expect(permissionsForRole('location-admin')).toContain('lap-remedial.manage');
+    });
+
+    it('gives the roles above faculty both track permissions', () => {
+      expect(permissionsForRole('location-admin')).toContain('lap-remedial.remedial-manage');
+      expect(permissionsForRole('location-admin')).toContain('lap-remedial.lap-manage');
+      expect(permissionsForRole('superadmin')).toContain('lap-remedial.remedial-manage');
+      expect(permissionsForRole('superadmin')).toContain('lap-remedial.lap-manage');
     });
   });
 
@@ -121,18 +129,18 @@ describe('AuthService', () => {
       expect(auth.visibleLocations().map((location) => location.id)).toEqual(['KOC']);
     });
 
-    it('scopes Faculty to the batches it was assigned, inside its location', () => {
+    it('scopes Faculty to its location, and every batch inside it', () => {
       signInWith(http, auth, FACULTY);
 
       expect(auth.role()).toBe('faculty');
       expect(auth.canAccessLocation('BLR')).toBe(true);
       expect(auth.canAccessLocation('CHN')).toBe(false);
-      expect(auth.canAccessBatch('103')).toBe(true);
-      expect(auth.canAccessBatch('104')).toBe(false);
 
+      // Batch-level access is gone: the assigned location brings every batch it
+      // holds, rather than only the ones a second list picked out.
       const visible = auth.visibleLocations();
       expect(visible.map((location) => location.id)).toEqual(['BLR']);
-      expect(visible[0].batches.map((batch) => batch.id)).toEqual(['103']);
+      expect(visible[0].batches.map((batch) => batch.id)).toEqual(['103', '104']);
     });
 
     it('reaches every location — and no configuration — as Program Manager', () => {
@@ -140,7 +148,6 @@ describe('AuthService', () => {
 
       expect(auth.scope()).toBe('all');
       expect(auth.canAccessLocation('DEL')).toBe(true);
-      expect(auth.canAccessBatch('999')).toBe(true);
       expect(auth.has('configuration.manage')).toBe(false);
       expect(auth.has('users.manage')).toBe(false);
       expect(auth.has('reports.view')).toBe(true);
@@ -152,7 +159,8 @@ describe('AuthService', () => {
       expect(auth.role()).toBe('superadmin');
       expect(auth.has('users.manage')).toBe(true);
       expect(auth.has('configuration.manage')).toBe(true);
-      expect(auth.has('lap-remedial.manage')).toBe(true);
+      expect(auth.has('lap-remedial.remedial-manage')).toBe(true);
+      expect(auth.has('lap-remedial.lap-manage')).toBe(true);
     });
 
     it('refuses a deactivated account and says why', () => {
@@ -207,7 +215,7 @@ describe('AuthService', () => {
 
       expect(restored.isAuthenticated()).toBe(true);
       expect(restored.role()).toBe('faculty');
-      expect(restored.assignedBatchIds()).toEqual(['103']);
+      expect(restored.assignedLocationIds()).toEqual(['BLR']);
       restoredHttp.verify();
     });
 
@@ -258,7 +266,7 @@ describe('AuthService', () => {
     it('replaces the role and the assignments behind it', () => {
       signInWith(http, auth, SUPER_ADMIN);
 
-      auth.setSessionRole('location-admin', ['MUM'], []);
+      auth.setSessionRole('location-admin', ['MUM']);
 
       expect(auth.role()).toBe('location-admin');
       expect(auth.has('users.manage')).toBe(false);
@@ -289,8 +297,10 @@ describe('AuthService', () => {
       expect(byId.get('superadmin')?.requiresLocations).toBe(false);
       expect(byId.get('program-manager')?.requiresLocations).toBe(false);
       expect(byId.get('location-admin')?.requiresLocations).toBe(true);
-      expect(byId.get('location-admin')?.requiresBatches).toBe(false);
-      expect(byId.get('faculty')?.requiresBatches).toBe(true);
+      // Faculty is location-scoped like any other, so it is assigned locations
+      // and reaches every batch inside them.
+      expect(byId.get('faculty')?.requiresLocations).toBe(true);
+      expect(byId.get('faculty')?.scope).toBe('assigned-locations');
     });
 
     it('serves the organisation tree narrowed to the assignment', () => {

@@ -487,9 +487,30 @@ public class DemoDataLoader implements ApplicationRunner {
      */
     private void seedDemoAccounts() {
         account(10295L, "kocadmin", "Kochi Location Admin", "koc@bizzskill.local",
-                "Koc@123", "location-admin", "KOC", null);
+                "Koc@123", "location-admin", "KOC");
+        // Two faculty members, both reaching all of Bangalore, differing only in the
+        // track permissions granted to the account itself.
         account(10296L, "faculty1", "Divya Sharma", "fac@bizzskill.local",
-                "Fac@123", "faculty", "BLR", 103L);
+                "Fac@123", "faculty", "BLR");
+        account(10297L, "faculty2", "Arjun Menon", "fac2@bizzskill.local",
+                "Fac@123", "faculty", "BLR");
+
+        // faculty1 may manage Remedial only; faculty2 may manage both tracks.
+        grantTracks(10296L, "lap-remedial.remedial-manage");
+        grantTracks(10297L, "lap-remedial.remedial-manage", "lap-remedial.lap-manage");
+    }
+
+    /** Grants track permissions to one demo account, over and above its role's. */
+    private void grantTracks(long employeeId, String... codes) {
+        for (String code : codes) {
+            jdbc.update("""
+                    insert into app_user_permission (intuser_id, intpermission_id)
+                    select u.intuser_id, p.intpermission_id
+                    from app_user u, app_permission p
+                    where u.intemployee_id = ? and p.txtpermission_code = ?
+                    on conflict do nothing
+                    """, employeeId, code);
+        }
     }
 
     private void account(
@@ -499,8 +520,7 @@ public class DemoDataLoader implements ApplicationRunner {
             String email,
             String password,
             String roleCode,
-            String locationId,
-            Long batchId) {
+            String locationId) {
 
         jdbc.update("""
                 insert into app_user (intemployee_id, txtusername, txtname, txtemail, txtpassword,
@@ -510,18 +530,12 @@ public class DemoDataLoader implements ApplicationRunner {
                 on conflict (intemployee_id) do nothing
                 """, employeeId, username, name, email, passwordEncoder.encode(password), roleCode);
 
-        jdbc.update("""
-                insert into app_user_location (intuser_id, txtlocation_id)
-                select intuser_id, ? from app_user where intemployee_id = ?
-                on conflict (intuser_id, txtlocation_id) do nothing
-                """, locationId, employeeId);
-
-        if (batchId != null) {
+        if (locationId != null) {
             jdbc.update("""
-                    insert into app_user_batch (intuser_id, intbatch_id)
+                    insert into app_user_location (intuser_id, txtlocation_id)
                     select intuser_id, ? from app_user where intemployee_id = ?
-                    on conflict (intuser_id, intbatch_id) do nothing
-                    """, batchId, employeeId);
+                    on conflict (intuser_id, txtlocation_id) do nothing
+                    """, locationId, employeeId);
         }
     }
 

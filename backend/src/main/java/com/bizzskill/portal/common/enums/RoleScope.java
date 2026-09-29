@@ -4,18 +4,22 @@ package com.bizzskill.portal.common.enums;
  * How much of the organisation a role's permissions reach.
  *
  * <p>This is what turns a permission check into a data filter: a role holding
- * {@code assessments.view} with scope {@link #ASSIGNED_BATCHES} may read results
- * <em>only</em> for the batches assigned to that user. Scope is therefore
- * enforced in the query layer, never in the UI.
+ * {@code assessments.view} with scope {@link #ASSIGNED_LOCATIONS} may read
+ * results <em>only</em> for the locations assigned to that user — and every batch
+ * and learning group inside them. Scope is therefore enforced in the query layer,
+ * never in the UI.
+ *
+ * <p>There is deliberately no batch-level scope. Access was granted per location
+ * and per batch, and a location-scoped user could see only some of a location's
+ * batches, which made the same person see a partial roster. Location access now
+ * means the whole location.
  */
 public enum RoleScope {
 
     /** Every location and batch; no assignment needed. */
     ALL("all"),
-    /** Only the locations assigned to the user. */
-    ASSIGNED_LOCATIONS("assigned-locations"),
-    /** Only the batches assigned to the user, within their locations. */
-    ASSIGNED_BATCHES("assigned-batches");
+    /** Only the locations assigned to the user, and everything inside them. */
+    ASSIGNED_LOCATIONS("assigned-locations");
 
     private final String code;
 
@@ -42,11 +46,6 @@ public enum RoleScope {
     /** Whether users of this scope must be assigned at least one location. */
     public boolean requiresLocations() {
         return this != ALL;
-    }
-
-    /** Whether users of this scope must be assigned at least one batch. */
-    public boolean requiresBatches() {
-        return this == ASSIGNED_BATCHES;
     }
 
     @jakarta.persistence.Converter(autoApply = true)

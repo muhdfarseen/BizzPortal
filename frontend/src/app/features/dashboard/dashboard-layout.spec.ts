@@ -203,9 +203,10 @@ describe('DashboardLayoutComponent', () => {
         'View LAP / Remedial',
         'Reports',
       ]);
-      expect(names).not.toContain('Manage LAP / Remedial');
+      expect(names).not.toContain('Manage Remedial');
+      expect(names).not.toContain('Manage LAP');
       expect(host(fixture).querySelector('.assigned-access-value')?.textContent?.trim()).toBe(
-        scopeSummary('faculty', ['BLR'], ['103']),
+        scopeSummary('faculty', ['BLR']),
       );
       expect(host(fixture).querySelector('.status-indicator')?.textContent).toContain(
         '5 permissions active',
@@ -222,9 +223,10 @@ describe('DashboardLayoutComponent', () => {
       );
 
       expect(host(fixture).querySelector('.assigned-access-value')?.textContent?.trim()).toBe(
-        scopeSummary('location-admin', ['KOC'], []),
+        scopeSummary('location-admin', ['KOC']),
       );
-      expect(names).toContain('Manage LAP / Remedial');
+      expect(names).toContain('Manage Remedial');
+      expect(names).toContain('Manage LAP');
       expect(names).not.toContain('User Management');
       expect(names).not.toContain('Exam Configuration');
     });

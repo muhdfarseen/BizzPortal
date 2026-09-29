@@ -96,6 +96,7 @@ const TRACK_ACTIONS: readonly AssessmentRowAction[] = [
       [exams]="exams()"
       [actions]="actions()"
       [showStartDate]="showStartDate()"
+      [startDateHeader]="startDateHeader()"
       [showRemark]="showRemark()"
       [pageIndex]="pageIndex()"
       [pageSize]="pageSize()"
@@ -115,6 +116,8 @@ class TestHostComponent {
   readonly exams = signal<readonly AssessmentExam[]>(EXAMS);
   readonly actions = signal<readonly AssessmentRowAction[]>([EDIT_ACTION]);
   readonly showStartDate = signal(false);
+  /** The default heading, so the grid's own default is what the first test sees. */
+  readonly startDateHeader = signal('Start Date');
   readonly showRemark = signal(false);
   readonly loading = signal(false);
 
@@ -722,6 +725,19 @@ describe('AssessmentTableComponent', () => {
     const dates = Array.from(host(fixture).querySelectorAll('.td-start-date'));
     expect(dates[0].textContent?.trim()).toBe('1 Sep 2026');
     expect(dates[1].textContent?.trim()).toBe('—');
+  });
+
+  it('names the start date column after the track the host is listing', () => {
+    const fixture = createFixture();
+
+    fixture.componentInstance.showStartDate.set(true);
+    fixture.componentInstance.startDateHeader.set('LAP Start Date');
+    fixture.detectChanges();
+    fixture.detectChanges();
+
+    // The host owns the wording, because only it knows which track's date the
+    // rows carry — the same column shows a different date on the two screens.
+    expect(headerLabels(fixture)).toContain('LAP Start Date');
   });
 
   it('shows the remark column only when the host asks for it', () => {
